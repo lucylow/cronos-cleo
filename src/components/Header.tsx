@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, Menu, X, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ConnectWalletButton from "@/wallet/ConnectWalletButton";
 
 const navLinks = [
   { href: "#demo", label: "Demo" },
@@ -49,6 +50,7 @@ export const Header = () => {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
+              className="flex items-center gap-3"
             >
               <Button variant="outline" size="sm" asChild>
                 <a href="https://github.com" target="_blank" rel="noopener noreferrer">
@@ -56,6 +58,7 @@ export const Header = () => {
                   GitHub
                 </a>
               </Button>
+              <ConnectWalletButton />
             </motion.div>
           </div>
 
@@ -96,6 +99,7 @@ export const Header = () => {
                     GitHub
                   </a>
                 </Button>
+                <ConnectWalletButton />
               </div>
             </motion.div>
           )}
