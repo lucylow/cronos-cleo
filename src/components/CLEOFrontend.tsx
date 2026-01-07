@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ethers } from "ethers";
 import { motion } from "framer-motion";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -6,17 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { BookOpen, Zap, PieChart, Settings, Bot } from "lucide-react";
+import { BookOpen, Zap, PieChart, Settings, Bot, Loader2 } from "lucide-react";
 import { useWallet } from "@/wallet/WalletProvider";
 import ConnectWalletButton from "@/wallet/ConnectWalletButton";
+import { toast } from "@/hooks/use-toast";
 
 // -------------------- Types --------------------
-
-type Token = {
-  symbol: string;
-  address: string;
-  decimals: number;
-};
 
 type DexPool = {
   dex: string;
@@ -40,6 +36,25 @@ type SimulationResult = {
   slippagePct: number;
   gasEstimate: number;
   routeBreakdown: SplitRoute[];
+};
+
+// -------------------- Configuration --------------------
+
+const MCP_ENDPOINT = "https://mcp.crypto.com/api/market"; // placeholder
+const FACILITATOR_ADDRESS = "0xFACILITATOR_PLACEHOLDER"; // x402 facilitator contract
+
+const FACILITATOR_ABI = [
+  "function executeConditionalBatch(address[] calldata targets, bytes[] calldata data, string calldata condition) external returns (bytes32)"
+];
+
+const ROUTER_SWAP_ABI = [
+  "function swapExactTokensForTokens(uint256,uint256,address[],address,uint256) external returns (uint256[] memory)"
+];
+
+const ROUTER_ADDRESSES: Record<string, string> = {
+  "VVS Finance": "0xVVS_ROUTER_PLACEHOLDER",
+  "CronaSwap": "0xCRONA_ROUTER_PLACEHOLDER",
+  "MM Finance": "0xMM_ROUTER_PLACEHOLDER",
 };
 
 // -------------------- Constants & Mocks --------------------
@@ -93,6 +108,62 @@ async function mockSimulateExecution(routes: SplitRoute[]): Promise<SimulationRe
   const slippagePct = ((routes[0].estimatedOut / (routes[0].amountIn || 1)) - 1) * -100;
   const gasEstimate = 120_000 + routes.length * 12_000;
   return { totalIn, totalOut, slippagePct: Math.abs(slippagePct), gasEstimate, routeBreakdown: routes };
+}
+
+// -------------------- AI + MCP Integration --------------------
+
+export async function fetchMCPLiquidity(pair = "CRO-USDC.e") {
+  try {
+    const url = `${MCP_ENDPOINT}?pair=${encodeURIComponent(pair)}`;
+    const res = await fetch(url, { headers: { "Content-Type": "application/json" } });
+    if (!res.ok) throw new Error(`MCP fetch failed: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("MCP fetch error", err);
+    return null;
+  }
+}
+
+export async function aiDecisioningEngine(amountIn: number, pools: DexPool[]) {
+  try {
+    await fetchMCPLiquidity("CRO-USDC.e");
+    // Fallback to local optimizer (AI agent would be called here in production)
+    return suggestSplits(amountIn, pools, 5);
+  } catch (err) {
+    console.error("aiDecisioningEngine error", err);
+    return suggestSplits(amountIn, pools, 5);
+  }
+}
+
+// -------------------- x402 Batch Builder --------------------
+
+function buildX402BatchData(routes: SplitRoute[], finalRecipient: string) {
+  const iface = new ethers.Interface(ROUTER_SWAP_ABI);
+  const targets: string[] = [];
+  const data: string[] = [];
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+
+  for (const r of routes) {
+    const routerAddr = ROUTER_ADDRESSES[r.dex] || ROUTER_ADDRESSES["VVS Finance"];
+    const amountInScaled = ethers.parseUnits(r.amountIn.toString(), 18);
+    const minOut = Math.max(1, Math.floor(r.estimatedOut * 0.995));
+    const amountOutMinScaled = ethers.parseUnits(minOut.toString(), 6);
+    const pathAddresses = r.path.map((sym) => sym === "CRO" ? "0xCRO_PLACEHOLDER" : "0xUSDCe_PLACEHOLDER");
+    const encoded = iface.encodeFunctionData("swapExactTokensForTokens", [amountInScaled, amountOutMinScaled, pathAddresses, finalRecipient, deadline]);
+    targets.push(routerAddr);
+    data.push(encoded);
+  }
+
+  const condition = `sum(outputs) >= ${Math.floor(routes.reduce((s, r) => s + r.estimatedOut, 0))}`;
+  return { targets, data, condition };
+}
+
+export async function submitX402Batch(signer: ethers.Signer, routes: SplitRoute[], finalRecipient: string) {
+  if (!signer) throw new Error("missing signer");
+  const facilitator = new ethers.Contract(FACILITATOR_ADDRESS, FACILITATOR_ABI, signer);
+  const { targets, data, condition } = buildX402BatchData(routes, finalRecipient);
+  const tx = await facilitator.executeConditionalBatch(targets, data, condition, { gasLimit: 1_200_000n });
+  return await tx.wait();
 }
 
 // -------------------- Small UI Components --------------------
@@ -286,7 +357,12 @@ function ChartPerformance({ history }: { history: { time: string; value: number 
   );
 }
 
-function TxPreview({ simulation }: { simulation?: SimulationResult | null }) {
+function TxPreview({ simulation, routes, onSubmit, isSubmitting }: { 
+  simulation?: SimulationResult | null; 
+  routes: SplitRoute[];
+  onSubmit: () => void;
+  isSubmitting: boolean;
+}) {
   return (
     <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
       <CardHeader>
@@ -310,8 +386,15 @@ function TxPreview({ simulation }: { simulation?: SimulationResult | null }) {
             <span className="text-foreground">{simulation?.gasEstimate || "—"}</span>
           </div>
         </div>
-        <Button className="w-full" size="sm">
-          Submit x402 Batch (Demo)
+        <Button className="w-full" size="sm" onClick={onSubmit} disabled={isSubmitting || routes.length === 0}>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Submitting...
+            </>
+          ) : (
+            "Submit x402 Batch (Demo)"
+          )}
         </Button>
       </CardContent>
     </Card>
@@ -321,10 +404,11 @@ function TxPreview({ simulation }: { simulation?: SimulationResult | null }) {
 // -------------------- Page Layout --------------------
 
 export default function CLEOFrontend() {
-  const { account } = useWallet();
+  const { account, signer } = useWallet();
   const [amount, setAmount] = useState(100000);
   const [routes, setRoutes] = useState(suggestSplits(100000, MOCK_POOLS, 5));
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [history, setHistory] = useState<{ time: string; value: number }[]>(() => {
     const now = Date.now();
     return Array.from({ length: 20 }).map((_, i) => ({
@@ -341,6 +425,27 @@ export default function CLEOFrontend() {
       ]);
     }
   }, [simulation?.totalOut]);
+
+  const handleSubmitBatch = async () => {
+    if (!signer || !account) {
+      toast({ title: "Error", description: "Please connect your wallet first", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const decisionRoutes = await aiDecisioningEngine(amount, MOCK_POOLS);
+      await submitX402Batch(signer, decisionRoutes, account);
+      toast({ title: "Success", description: "x402 batch submitted successfully!" });
+    } catch (err) {
+      console.error("Batch submission failed:", err);
+      toast({ 
+        title: "Demo Mode", 
+        description: "This is a demo — real submission requires deployed contracts.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -387,7 +492,7 @@ export default function CLEOFrontend() {
 
             <div className="grid md:grid-cols-2 gap-6">
               <ChartPerformance history={history} />
-              <TxPreview simulation={simulation} />
+              <TxPreview simulation={simulation} routes={routes} onSubmit={handleSubmitBatch} isSubmitting={isSubmitting} />
             </div>
           </div>
 
