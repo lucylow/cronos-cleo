@@ -187,9 +187,11 @@ function Logo() {
 function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (routes: SplitRoute[]) => void }) {
   const [maxImpact, setMaxImpact] = useState(5);
   const [pools, setPools] = useState(MOCK_POOLS);
+  const [displayRoutes, setDisplayRoutes] = useState<SplitRoute[]>(() => suggestSplits(amountIn, MOCK_POOLS, 5));
 
   useEffect(() => {
     const routes = suggestSplits(amountIn, pools, maxImpact);
+    setDisplayRoutes(routes);
     onChange(routes);
   }, [amountIn, maxImpact, pools, onChange]);
 
@@ -207,11 +209,12 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
           <div className="space-y-3">
             <h4 className="font-semibold text-sm text-foreground">Suggested Splits</h4>
             <div className="space-y-2">
-              {suggestSplits(amountIn, pools, maxImpact).map((r) => (
+              {displayRoutes.map((r, index) => (
                 <motion.div
-                  key={r.id}
+                  key={`${r.dex}-${index}`}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
                   className="flex justify-between items-center p-3 rounded-lg bg-muted/50 border border-border/50"
                 >
                   <div>
