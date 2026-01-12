@@ -32,6 +32,7 @@ export const APP_ROUTES: AppRoute[] = [
     ]
   },
   { key: 'settlement', title: 'Settlement', path: '/settlement', icon: CreditCard },
+  { key: 'payments', title: 'Payments', path: '/payments', icon: CreditCard },
   { key: 'payment-review', title: 'Payment Review', path: '/payment-review', icon: ShieldCheck, requiresAuth: true },
   { key: 'dao', title: 'DAO Governance', path: '/dao', icon: Vote },
   { key: 'app', title: 'CLEO App', path: '/app', icon: Shuffle },

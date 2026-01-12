@@ -11,6 +11,8 @@
     "deploy:nft:mainnet": "hardhat run scripts/deploy-nft.js --network cronos_mainnet",
     "deploy:nft-dao:testnet": "hardhat run scripts/deploy-nft-dao.js --network cronos_testnet",
     "deploy:nft-dao:mainnet": "hardhat run scripts/deploy-nft-dao.js --network cronos_mainnet",
+    "deploy:payment:testnet": "hardhat run scripts/deploy-payment.js --network cronos_testnet",
+    "deploy:payment:mainnet": "hardhat run scripts/deploy-payment.js --network cronos_mainnet",
     "verify": "hardhat verify --network cronos_testnet"
   },
   "devDependencies": {
