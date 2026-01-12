@@ -768,6 +768,190 @@ export async function verifyPayment(
   );
 }
 
+// ==================== DAO API ====================
+
+export interface DAOInfo {
+  dao_address: string;
+  token_address: string;
+  treasury_address: string;
+  quorum_percentage: number;
+  proposal_threshold: string;
+  voting_period_seconds: number;
+}
+
+export interface Proposal {
+  id: number;
+  proposer: string;
+  start_time: number;
+  end_time: number;
+  for_votes: string;
+  against_votes: string;
+  abstain_votes: string;
+  status: number;
+  proposal_type: number;
+  target: string;
+  value: string;
+  token: string;
+  recipient: string;
+  call_data: string;
+  description: string;
+}
+
+export interface VotingPower {
+  balance: string;
+  can_propose: boolean;
+  proposal_threshold: string;
+  total_supply: string;
+}
+
+export async function getDAOInfo(options?: RequestOptions): Promise<DAOInfo> {
+  return fetchWithRetry<DAOInfo>(
+    `${API_BASE_URL}/api/dao/info`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    options
+  );
+}
+
+export async function getProposal(
+  proposalId: number,
+  options?: RequestOptions
+): Promise<Proposal> {
+  return fetchWithRetry<Proposal>(
+    `${API_BASE_URL}/api/dao/proposal/${proposalId}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    options
+  );
+}
+
+export async function getVotingPower(
+  userAddress: string,
+  options?: RequestOptions
+): Promise<VotingPower> {
+  return fetchWithRetry<VotingPower>(
+    `${API_BASE_URL}/api/dao/voting-power/${userAddress}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    options
+  );
+}
+
+export interface CreateProposalRequest {
+  proposal_type: 'eth_transfer' | 'erc20_transfer' | 'arbitrary_call';
+  recipient?: string;
+  token?: string;
+  amount: string;
+  description: string;
+  private_key: string;
+  target?: string;
+  call_data?: string;
+  value?: string;
+}
+
+export interface VoteRequest {
+  proposal_id: number;
+  support: 0 | 1 | 2; // 0 = Against, 1 = For, 2 = Abstain
+  private_key: string;
+}
+
+export interface ExecuteProposalRequest {
+  proposal_id: number;
+  private_key: string;
+}
+
+export async function createProposal(
+  request: CreateProposalRequest,
+  options?: RequestOptions
+): Promise<{ tx_hash: string; proposal_id: number | null; status: string }> {
+  return fetchWithRetry(
+    `${API_BASE_URL}/api/dao/proposal/create`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
+export async function voteOnProposal(
+  request: VoteRequest,
+  options?: RequestOptions
+): Promise<{ tx_hash: string; status: string }> {
+  return fetchWithRetry(
+    `${API_BASE_URL}/api/dao/vote`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
+export async function finalizeProposal(
+  request: ExecuteProposalRequest,
+  options?: RequestOptions
+): Promise<{ tx_hash: string; status: string }> {
+  return fetchWithRetry(
+    `${API_BASE_URL}/api/dao/proposal/finalize`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
+export async function executeProposal(
+  request: ExecuteProposalRequest,
+  options?: RequestOptions
+): Promise<{ tx_hash: string; status: string }> {
+  return fetchWithRetry(
+    `${API_BASE_URL}/api/dao/proposal/execute`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
 // Export API object for convenience
 export const api = {
   optimize: optimizeRoutes,
@@ -785,6 +969,14 @@ export const api = {
   sendTransaction: sendTransaction,
   monitorTransaction: monitorTransaction,
   verifyPayment: verifyPayment,
+  // DAO API
+  getDAOInfo,
+  getProposal,
+  getVotingPower,
+  createProposal,
+  voteOnProposal,
+  finalizeProposal,
+  executeProposal,
   clearCache,
   clearCachePattern,
 };

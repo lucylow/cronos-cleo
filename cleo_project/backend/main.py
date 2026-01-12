@@ -263,7 +263,7 @@ hitl_db_session = None
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
-    global liquidity_monitor, ai_agent, data_pipeline, mcp_client, x402_executor, orchestrator, pipeline_executor, workflow_manager, agent_orchestrator
+    global liquidity_monitor, ai_agent, data_pipeline, mcp_client, x402_executor, orchestrator, pipeline_executor, workflow_manager, agent_orchestrator, intelligent_settlement, settlement_agent
     
     try:
         logger.info("Starting C.L.E.O. Backend API...")
@@ -493,7 +493,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    global mcp_client, orchestrator, db_session
+    global mcp_client, orchestrator, db_session, settlement_agent
     logger.info("Shutting down C.L.E.O. Backend API...")
     
     try:
@@ -510,6 +510,13 @@ async def shutdown_event():
                 logger.info("Orchestrator stopped")
             except Exception as e:
                 logger.error(f"Error stopping orchestrator: {e}")
+        
+        if settlement_agent:
+            try:
+                await settlement_agent.stop()
+                logger.info("Settlement agent stopped")
+            except Exception as e:
+                logger.error(f"Error stopping settlement agent: {e}")
         
         if db_session:
             try:
