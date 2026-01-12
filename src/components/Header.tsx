@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bot, Menu, X, Github } from "lucide-react";
+import { Bot, Menu, X, Github, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import ConnectWalletButton from "@/wallet/ConnectWalletButton";
 
 const navLinks = [
@@ -15,15 +16,15 @@ export const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <header className="fixed top-0 w-full z-50 glass">
-      <div className="container mx-auto px-4 py-4">
+    <header className="fixed top-0 w-full z-50 glass border-b border-border/30">
+      <div className="container mx-auto px-4 py-3">
         <nav className="flex justify-between items-center">
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center gap-3"
           >
-            <div className="w-10 h-10 rounded-lg bg-gradient-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
               <Bot className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="font-display font-extrabold text-xl text-gradient-primary">
@@ -32,7 +33,7 @@ export const Header = () => {
           </motion.div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-6">
             {navLinks.map((link, index) => (
               <motion.a
                 key={link.href}
@@ -40,27 +41,33 @@ export const Header = () => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
-                className="text-foreground/80 hover:text-secondary transition-colors font-medium relative group"
+                className="text-foreground/70 hover:text-foreground transition-colors font-medium text-sm relative group"
               >
                 {link.label}
                 <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-primary group-hover:w-full transition-all duration-300" />
               </motion.a>
             ))}
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="flex items-center gap-3"
-            >
-              <Button variant="outline" size="sm" asChild>
-                <a href="https://github.com" target="_blank" rel="noopener noreferrer">
-                  <Github className="w-4 h-4 mr-2" />
-                  GitHub
-                </a>
-              </Button>
-              <ConnectWalletButton />
-            </motion.div>
           </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="hidden md:flex items-center gap-3"
+          >
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+              <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+                <Github className="w-4 h-4" />
+              </a>
+            </Button>
+            <ConnectWalletButton />
+            <Button asChild size="sm" className="bg-gradient-primary hover:shadow-glow transition-shadow">
+              <Link to="/dashboard">
+                <Rocket className="w-4 h-4 mr-2" />
+                Launch App
+              </Link>
+            </Button>
+          </motion.div>
 
           {/* Mobile Menu Button */}
           <Button
@@ -93,13 +100,15 @@ export const Header = () => {
                     {link.label}
                   </a>
                 ))}
-                <Button variant="outline" size="sm" asChild className="w-fit">
-                  <a href="https://github.com" target="_blank" rel="noopener noreferrer">
-                    <Github className="w-4 h-4 mr-2" />
-                    GitHub
-                  </a>
-                </Button>
-                <ConnectWalletButton />
+                <div className="flex flex-col gap-3 pt-2">
+                  <ConnectWalletButton />
+                  <Button asChild className="bg-gradient-primary">
+                    <Link to="/dashboard" onClick={() => setIsMenuOpen(false)}>
+                      <Rocket className="w-4 h-4 mr-2" />
+                      Launch App
+                    </Link>
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
