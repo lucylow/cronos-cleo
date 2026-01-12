@@ -2450,11 +2450,89 @@ async def get_due_instruction_sets():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# ==================== Payment Verification Endpoints ====================
 
-telligent-settlement/create-deal")
+class PaymentVerifyRequest(BaseModel):
+    tx_hash: str
+    token_address: Optional[str] = None
+    expected_recipient: Optional[str] = None
+    min_amount_wei: Optional[str] = None
+
+class PaymentVerifyResponse(BaseModel):
+    ok: bool
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+@app.post("/api/payments/verify", response_model=PaymentVerifyResponse)
+async def verify_payment(request: PaymentVerifyRequest):
+    """
+    Verify a payment transaction (native CRO or ERC-20)
+    
+    - For native CRO: verify tx value and recipient
+    - For ERC-20: verify Transfer event logs
+    """
+    try:
+        from verify_payment import verify_native_payment, verify_erc20_payment
+        
+        if request.token_address:
+            # ERC-20 payment verification
+            result = await verify_erc20_payment(
+                tx_hash=request.tx_hash,
+                token_address=request.token_address,
+                expected_to=request.expected_recipient,
+                min_amount=int(request.min_amount_wei) if request.min_amount_wei else None
+            )
+        else:
+            # Native CRO payment verification
+            result = await verify_native_payment(
+                tx_hash=request.tx_hash,
+                expected_recipient=request.expected_recipient,
+                min_value_wei=int(request.min_amount_wei) if request.min_amount_wei else None
+            )
+        
+        return PaymentVerifyResponse(
+            ok=True,
+            result={
+                "receipt": result.get("receipt", {}),
+                "parsed": result.get("parsed", {}),
+                "tx": result.get("tx", {})
+            }
+        )
+    except ValueError as e:
+        return PaymentVerifyResponse(ok=False, error=str(e))
+    except Exception as e:
+        logger.error(f"Error verifying payment: {e}", exc_info=True)
+        return PaymentVerifyResponse(ok=False, error=str(e))
+
+class PaymentContractInfoResponse(BaseModel):
+    contract_address: str
+    payment_count: Optional[int] = None
+    owner: Optional[str] = None
+
+@app.get("/api/payments/contract-info", response_model=PaymentContractInfoResponse)
+async def get_payment_contract_info():
+    """Get payment processor contract information"""
+    try:
+        payment_contract_address = os.getenv("PAYMENT_CONTRACT_ADDRESS")
+        if not payment_contract_address:
+            raise HTTPException(
+                status_code=503,
+                detail="Payment contract address not configured"
+            )
+        
+        # Optional: Query contract state if needed
+        # This requires web3 connection to the contract
+        
+        return PaymentContractInfoResponse(
+            contract_address=payment_contract_address
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting payment contract info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/intelligent-settlement/create-deal")
 async def create_intelligent_settlement_deal(request: CreateDealRequest):
     """Create a new intelligent settlement deal with milestones"""
     try:

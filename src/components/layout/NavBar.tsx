@@ -36,6 +36,9 @@ export default function NavBar({ onOpenSidebar }: Props) {
           <Link to="/agent" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             AI Agent
           </Link>
+          <Link to="/dao" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Governance
+          </Link>
         </nav>
 
         <ConnectWalletButton />
