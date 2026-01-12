@@ -54,11 +54,76 @@ npm run dev
 
 This project is built with:
 
+**Frontend:**
 - Vite
 - TypeScript
 - React
 - shadcn-ui
 - Tailwind CSS
+- Ethers.js
+
+**Backend:**
+- FastAPI (Python)
+- Web3.py
+- scikit-learn (ML models)
+- SQLAlchemy
+
+## Backend Integration
+
+The backend is located in `cleo_project/backend/`. To integrate it with the frontend:
+
+### 1. Setup Backend
+
+```sh
+cd cleo_project/backend
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Copy environment file (optional)
+cp .env.example .env
+
+# Run the backend server
+python main.py
+# Or: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The backend will run on `http://localhost:8000` by default.
+
+### 2. Configure Frontend
+
+Create a `.env` file in the project root:
+
+```sh
+VITE_API_URL=http://localhost:8000
+```
+
+If not set, the frontend defaults to `http://localhost:8000`.
+
+### 3. Run Both Services
+
+**Terminal 1 - Backend:**
+```sh
+cd cleo_project/backend
+python main.py
+```
+
+**Terminal 2 - Frontend:**
+```sh
+npm run dev
+```
+
+The frontend will automatically connect to the backend API. You'll see a connection indicator in the header (green = connected, red = disconnected).
+
+### Backend API Endpoints
+
+- `GET /health` - Health check
+- `GET /api/pools/{token_in}/{token_out}` - Get available pools
+- `POST /api/optimize` - Optimize routes using AI
+- `POST /api/simulate` - Simulate execution
+- `GET /api/liquidity/{pair}` - Get liquidity data
+
+See `cleo_project/backend/README.md` for more details.
 
 ## How can I deploy this project?
 

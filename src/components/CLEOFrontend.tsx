@@ -11,6 +11,16 @@ import { BookOpen, Zap, PieChart, Settings, Bot, Loader2 } from "lucide-react";
 import { useWallet } from "@/wallet/WalletProvider";
 import ConnectWalletButton from "@/wallet/ConnectWalletButton";
 import { toast } from "@/hooks/use-toast";
+import { 
+  fetchPools, 
+  optimizeRoutes, 
+  simulateExecution, 
+  getLiquidityData,
+  checkHealth,
+  type PoolInfo,
+  type SplitRoute as APISplitRoute,
+  type SimulationResult as APISimulationResult
+} from "@/lib/api";
 
 // -------------------- Types --------------------
 
@@ -102,35 +112,78 @@ function suggestSplits(amountIn: number, pools: DexPool[], maxImpactPct = 5) {
 }
 
 async function mockSimulateExecution(routes: SplitRoute[]): Promise<SimulationResult> {
-  await new Promise((r) => setTimeout(r, 200));
-  const totalIn = routes.reduce((s, r) => s + r.amountIn, 0);
-  const totalOut = routes.reduce((s, r) => s + r.estimatedOut, 0);
-  const slippagePct = ((routes[0].estimatedOut / (routes[0].amountIn || 1)) - 1) * -100;
-  const gasEstimate = 120_000 + routes.length * 12_000;
-  return { totalIn, totalOut, slippagePct: Math.abs(slippagePct), gasEstimate, routeBreakdown: routes };
+  try {
+    // Try to use backend API
+    const apiRoutes: APISplitRoute[] = routes.map(r => ({
+      id: r.id,
+      dex: r.dex,
+      amountIn: r.amountIn,
+      estimatedOut: r.estimatedOut,
+      path: r.path,
+      pool_address: undefined,
+    }));
+    
+    const result = await simulateExecution(apiRoutes);
+    
+    // Convert to frontend format
+    return {
+      totalIn: result.totalIn,
+      totalOut: result.totalOut,
+      slippagePct: result.slippagePct,
+      gasEstimate: result.gasEstimate,
+      routeBreakdown: result.routeBreakdown.map(r => ({
+        id: r.id,
+        dex: r.dex,
+        amountIn: r.amountIn,
+        estimatedOut: r.estimatedOut,
+        path: r.path,
+      })),
+    };
+  } catch (err) {
+    console.warn("Simulation API error, using fallback:", err);
+    // Fallback to local calculation
+    await new Promise((r) => setTimeout(r, 200));
+    const totalIn = routes.reduce((s, r) => s + r.amountIn, 0);
+    const totalOut = routes.reduce((s, r) => s + r.estimatedOut, 0);
+    const slippagePct = routes.length > 0 ? ((routes[0].estimatedOut / (routes[0].amountIn || 1)) - 1) * -100 : 0;
+    const gasEstimate = 120_000 + routes.length * 12_000;
+    return { totalIn, totalOut, slippagePct: Math.abs(slippagePct), gasEstimate, routeBreakdown: routes };
+  }
 }
 
 // -------------------- AI + MCP Integration --------------------
 
 export async function fetchMCPLiquidity(pair = "CRO-USDC.e") {
   try {
-    const url = `${MCP_ENDPOINT}?pair=${encodeURIComponent(pair)}`;
-    const res = await fetch(url, { headers: { "Content-Type": "application/json" } });
-    if (!res.ok) throw new Error(`MCP fetch failed: ${res.status}`);
-    return await res.json();
+    const data = await getLiquidityData(pair);
+    return data;
   } catch (err) {
     console.warn("MCP fetch error", err);
     return null;
   }
 }
 
-export async function aiDecisioningEngine(amountIn: number, pools: DexPool[]) {
+export async function aiDecisioningEngine(amountIn: number, pools: DexPool[]): Promise<SplitRoute[]> {
   try {
-    await fetchMCPLiquidity("CRO-USDC.e");
-    // Fallback to local optimizer (AI agent would be called here in production)
-    return suggestSplits(amountIn, pools, 5);
+    // Try to use backend API
+    const result = await optimizeRoutes({
+      token_in: "CRO",
+      token_out: "USDC.e",
+      amount_in: amountIn,
+      max_slippage: 0.005
+    });
+    
+    // Convert API routes to frontend format
+    return result.routes.map((r, i) => ({
+      id: r.id || `r_${i}`,
+      dex: r.dex,
+      amountIn: r.amountIn,
+      estimatedOut: r.estimatedOut,
+      path: r.path,
+    }));
   } catch (err) {
-    console.error("aiDecisioningEngine error", err);
+    console.error("aiDecisioningEngine error, using fallback:", err);
+    // Fallback to local optimizer
     return suggestSplits(amountIn, pools, 5);
   }
 }
@@ -188,12 +241,61 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
   const [maxImpact, setMaxImpact] = useState(5);
   const [pools, setPools] = useState(MOCK_POOLS);
   const [displayRoutes, setDisplayRoutes] = useState<SplitRoute[]>(() => suggestSplits(amountIn, MOCK_POOLS, 5));
+  const [isLoadingPools, setIsLoadingPools] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
 
+  // Load pools from backend
   useEffect(() => {
-    const routes = suggestSplits(amountIn, pools, maxImpact);
-    setDisplayRoutes(routes);
-    onChange(routes);
-  }, [amountIn, maxImpact, pools, onChange]);
+    const loadPools = async () => {
+      setIsLoadingPools(true);
+      try {
+        const apiPools = await fetchPools("CRO", "USDC.e");
+        if (apiPools.length > 0) {
+          const convertedPools: DexPool[] = apiPools.map(p => ({
+            dex: p.dex,
+            pair: p.pair,
+            reserveIn: p.reserveIn,
+            reserveOut: p.reserveOut,
+            feeBps: p.feeBps,
+          }));
+          setPools(convertedPools);
+        }
+      } catch (err) {
+        console.warn("Failed to load pools from API, using mock data:", err);
+      } finally {
+        setIsLoadingPools(false);
+      }
+    };
+    loadPools();
+  }, []);
+
+  // Optimize routes when amount changes
+  useEffect(() => {
+    const optimize = async () => {
+      setIsOptimizing(true);
+      try {
+        const optimized = await aiDecisioningEngine(amountIn, pools);
+        if (optimized.length > 0) {
+          setDisplayRoutes(optimized);
+          onChange(optimized);
+        } else {
+          // Fallback to local calculation
+          const routes = suggestSplits(amountIn, pools, maxImpact);
+          setDisplayRoutes(routes);
+          onChange(routes);
+        }
+      } catch (err) {
+        console.warn("Optimization failed, using fallback:", err);
+        const routes = suggestSplits(amountIn, pools, maxImpact);
+        setDisplayRoutes(routes);
+        onChange(routes);
+      } finally {
+        setIsOptimizing(false);
+      }
+    };
+    
+    optimize();
+  }, [amountIn, pools, onChange]);
 
   return (
     <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
@@ -201,7 +303,9 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
         <CardTitle className="flex items-center gap-2">
           <PieChart className="w-5 h-5 text-primary" />
           Multi-DEX Route Builder
-          <span className="ml-auto text-sm font-normal text-muted-foreground">Max impact: {maxImpact}%</span>
+          <span className="ml-auto text-sm font-normal text-muted-foreground">
+            {isOptimizing ? "Optimizing..." : `Max impact: ${maxImpact}%`}
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -257,10 +361,31 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPools((s) => [...s].sort(() => Math.random() - 0.5))}
+              onClick={async () => {
+                setIsLoadingPools(true);
+                try {
+                  const apiPools = await fetchPools("CRO", "USDC.e");
+                  if (apiPools.length > 0) {
+                    const convertedPools: DexPool[] = apiPools.map(p => ({
+                      dex: p.dex,
+                      pair: p.pair,
+                      reserveIn: p.reserveIn,
+                      reserveOut: p.reserveOut,
+                      feeBps: p.feeBps,
+                    }));
+                    setPools(convertedPools);
+                    toast({ title: "Success", description: "Pools refreshed from backend" });
+                  }
+                } catch (err) {
+                  toast({ title: "Warning", description: "Using cached pools", variant: "destructive" });
+                } finally {
+                  setIsLoadingPools(false);
+                }
+              }}
+              disabled={isLoadingPools}
               className="w-full"
             >
-              Re-scan Pools
+              {isLoadingPools ? "Loading..." : "Re-scan Pools"}
             </Button>
           </div>
         </div>
@@ -412,6 +537,7 @@ export default function CLEOFrontend() {
   const [routes, setRoutes] = useState(suggestSplits(100000, MOCK_POOLS, 5));
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(false);
   const [history, setHistory] = useState<{ time: string; value: number }[]>(() => {
     const now = Date.now();
     return Array.from({ length: 20 }).map((_, i) => ({
@@ -419,6 +545,11 @@ export default function CLEOFrontend() {
       value: Math.random() * 0.5 + 0.2,
     }));
   });
+
+  // Check backend connection on mount
+  useEffect(() => {
+    checkHealth().then(setBackendConnected);
+  }, []);
 
   useEffect(() => {
     if (simulation) {
@@ -458,6 +589,12 @@ export default function CLEOFrontend() {
           <Logo />
           <div className="flex items-center gap-4">
             <span className="text-xs text-muted-foreground hidden sm:block">Cronos x402 Hackathon • Agentic Finance</span>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-green-500' : 'bg-red-500'}`} title={backendConnected ? 'Backend connected' : 'Backend disconnected'} />
+              <span className="text-xs text-muted-foreground hidden sm:block">
+                {backendConnected ? 'API' : 'Offline'}
+              </span>
+            </div>
             <ConnectWalletButton />
           </div>
         </div>

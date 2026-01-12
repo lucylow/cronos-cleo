@@ -1,0 +1,23 @@
+{
+  "name": "cleo-contracts",
+  "version": "1.0.0",
+  "description": "C.L.E.O. Cross-DEX Router Smart Contracts",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network cronos_testnet",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network cronos_mainnet",
+    "verify": "hardhat verify --network cronos_testnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0",
+    "dotenv": "^16.3.1"
+  },
+  "dependencies": {
+    "@crypto.com/facilitator-client": "^1.0.0"
+  }
+}
+
