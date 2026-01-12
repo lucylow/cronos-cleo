@@ -9,6 +9,7 @@ import AppLayout from "./components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import Agent from "./pages/Agent";
+import PaymentReview from "./pages/PaymentReview";
 import CLEOFrontend from "./components/CLEOFrontend";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
@@ -35,6 +36,7 @@ const App = () => (
               <Route path="/agent/decisions" element={<Agent />} />
               <Route path="/agent/logs" element={<Agent />} />
               <Route path="/settlement" element={<Dashboard />} />
+              <Route path="/payment-review" element={<PaymentReview />} />
               <Route path="/app" element={<CLEOFrontend />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/account" element={<Dashboard />} />

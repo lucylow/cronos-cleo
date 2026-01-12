@@ -17,6 +17,7 @@ import {
   simulateExecution, 
   getLiquidityData,
   checkHealth,
+  ApiClientError,
   type PoolInfo,
   type SplitRoute as APISplitRoute,
   type SimulationResult as APISimulationResult
@@ -123,7 +124,10 @@ async function mockSimulateExecution(routes: SplitRoute[]): Promise<SimulationRe
       pool_address: undefined,
     }));
     
-    const result = await simulateExecution(apiRoutes);
+    const result = await simulateExecution(apiRoutes, {
+      timeout: 45000,
+      retries: 2,
+    });
     
     // Convert to frontend format
     return {
@@ -140,7 +144,9 @@ async function mockSimulateExecution(routes: SplitRoute[]): Promise<SimulationRe
       })),
     };
   } catch (err) {
-    console.warn("Simulation API error, using fallback:", err);
+    if (err instanceof ApiClientError && err.code !== 'CANCELLED') {
+      console.warn("Simulation API error, using fallback:", err.message);
+    }
     // Fallback to local calculation
     await new Promise((r) => setTimeout(r, 200));
     const totalIn = routes.reduce((s, r) => s + r.amountIn, 0);
@@ -249,7 +255,10 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
     const loadPools = async () => {
       setIsLoadingPools(true);
       try {
-        const apiPools = await fetchPools("CRO", "USDC.e");
+        const apiPools = await fetchPools("CRO", "USDC.e", {
+          cache: true,
+          cacheTTL: 30000,
+        });
         if (apiPools.length > 0) {
           const convertedPools: DexPool[] = apiPools.map(p => ({
             dex: p.dex,
@@ -261,7 +270,9 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
           setPools(convertedPools);
         }
       } catch (err) {
-        console.warn("Failed to load pools from API, using mock data:", err);
+        if (err instanceof ApiClientError && err.code !== 'CANCELLED') {
+          console.warn("Failed to load pools from API, using mock data:", err.message);
+        }
       } finally {
         setIsLoadingPools(false);
       }
@@ -364,7 +375,13 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
               onClick={async () => {
                 setIsLoadingPools(true);
                 try {
-                  const apiPools = await fetchPools("CRO", "USDC.e");
+                  // Clear cache to force refresh
+                  const { clearCachePattern } = await import("@/lib/api");
+                  clearCachePattern("GET:/api/pools");
+                  
+                  const apiPools = await fetchPools("CRO", "USDC.e", {
+                    cache: false, // Force fresh fetch
+                  });
                   if (apiPools.length > 0) {
                     const convertedPools: DexPool[] = apiPools.map(p => ({
                       dex: p.dex,
@@ -377,7 +394,15 @@ function RouteBuilder({ amountIn, onChange }: { amountIn: number; onChange: (rou
                     toast({ title: "Success", description: "Pools refreshed from backend" });
                   }
                 } catch (err) {
-                  toast({ title: "Warning", description: "Using cached pools", variant: "destructive" });
+                  if (err instanceof ApiClientError) {
+                    toast({ 
+                      title: "Error", 
+                      description: err.message || "Failed to refresh pools", 
+                      variant: "destructive" 
+                    });
+                  } else {
+                    toast({ title: "Warning", description: "Using cached pools", variant: "destructive" });
+                  }
                 } finally {
                   setIsLoadingPools(false);
                 }

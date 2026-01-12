@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, TrendingUp, Zap, Shield } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, ApiClientError } from '@/lib/api';
 
 interface Route {
   id: string;
@@ -53,6 +53,7 @@ export function CLEOSwapInterface() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [executionProgress, setExecutionProgress] = useState(0);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const handleAnalyze = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -81,10 +82,18 @@ export function CLEOSwapInterface() {
   };
 
   const handleExecute = async () => {
-    if (!optimization || !signer || !address) {
+    if (!optimization || !signer || !account) {
       setError('Missing required data for execution');
       return;
     }
+
+    // Cancel any previous request
+    if (abortController) {
+      abortController.abort();
+    }
+
+    const controller = new AbortController();
+    setAbortController(controller);
 
     setIsExecuting(true);
     setError(null);
@@ -98,12 +107,19 @@ export function CLEOSwapInterface() {
 
       // Step 2: Execute swap
       setExecutionProgress(30);
-      const result = await api.execute({
-        token_in: tokenIn,
-        token_out: tokenOut,
-        amount_in: parseFloat(amount),
-        max_slippage: maxSlippage / 100,
-      });
+      const result = await api.execute(
+        {
+          token_in: tokenIn,
+          token_out: tokenOut,
+          amount_in: parseFloat(amount),
+          max_slippage: maxSlippage / 100,
+        },
+        {
+          signal: controller.signal,
+          timeout: 120000, // 2 minutes
+          retries: 1, // Don't retry execution
+        }
+      );
 
       setExecutionProgress(100);
       
@@ -118,10 +134,19 @@ export function CLEOSwapInterface() {
         setError(result.execution?.error || 'Execution failed');
       }
     } catch (err: any) {
-      setError(err.message || 'Execution failed');
+      if (err instanceof ApiClientError) {
+        if (err.code === 'CANCELLED') {
+          setError('Execution was cancelled');
+          return;
+        }
+        setError(err.message || 'Execution failed');
+      } else {
+        setError(err.message || 'Execution failed');
+      }
     } finally {
       setIsExecuting(false);
       setExecutionProgress(0);
+      setAbortController(null);
     }
   };
 
@@ -141,7 +166,7 @@ export function CLEOSwapInterface() {
     const routerAddress = process.env.VITE_ROUTER_ADDRESS || '0x0000000000000000000000000000000000000000';
     
     // Check current allowance
-    const allowance = await tokenContract.allowance(address, routerAddress);
+    const allowance = await tokenContract.allowance(account, routerAddress);
     const amountWei = ethers.parseEther(amount);
 
     if (allowance < amountWei) {
@@ -355,24 +380,36 @@ export function CLEOSwapInterface() {
             </div>
 
             {/* Execute Button */}
-            <Button
-              onClick={handleExecute}
-              disabled={!isConnected || isExecuting}
-              className="w-full"
-              size="lg"
-            >
-              {isExecuting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Executing...
-                </>
-              ) : (
-                <>
-                  <Zap className="mr-2 h-4 w-4" />
-                  Execute Optimized Swap
-                </>
+            <div className="space-y-2">
+              <Button
+                onClick={handleExecute}
+                disabled={!isConnected || isExecuting}
+                className="w-full"
+                size="lg"
+              >
+                {isExecuting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Executing...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Execute Optimized Swap
+                  </>
+                )}
+              </Button>
+              {isExecuting && abortController && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => abortController.abort()}
+                  className="w-full"
+                >
+                  Cancel Execution
+                </Button>
               )}
-            </Button>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -54,8 +54,15 @@ async function main() {
       transactionHash: router.deploymentTransaction().hash,
       blockNumber: (await ethers.provider.getBlockNumber()).toString(),
     },
+    intelligentSettlement: {
+      address: settlementAddress,
+      deployer: deployer.address,
+      transactionHash: settlement.deploymentTransaction().hash,
+      blockNumber: (await ethers.provider.getBlockNumber()).toString(),
+    },
     facilitator: facilitatorAddress,
     feeRecipient: feeRecipient,
+    authorizedAgent: authorizedAgent,
     timestamp: new Date().toISOString(),
   };
 
@@ -68,17 +75,30 @@ async function main() {
   fs.writeFileSync(deploymentFile, JSON.stringify(deploymentInfo, null, 2));
   console.log("📄 Deployment info saved to:", deploymentFile);
 
-  // Verify contract (optional, requires API key)
+  // Verify contracts (optional, requires API key)
   if (network.chainId !== 1337n && process.env.CRONOSCAN_API_KEY) {
-    console.log("\n🔍 Verifying contract on Cronoscan...");
+    console.log("\n🔍 Verifying contracts on Cronoscan...");
+    
+    // Verify CLECORouter
     try {
       await hre.run("verify:verify", {
         address: routerAddress,
         constructorArguments: [facilitatorAddress, feeRecipient],
       });
-      console.log("✅ Contract verified!");
+      console.log("✅ CLECORouter verified!");
     } catch (error) {
-      console.log("⚠️  Verification failed (this is OK if contract is already verified):", error.message);
+      console.log("⚠️  CLECORouter verification failed (this is OK if contract is already verified):", error.message);
+    }
+    
+    // Verify IntelligentSettlement
+    try {
+      await hre.run("verify:verify", {
+        address: settlementAddress,
+        constructorArguments: [feeRecipient, authorizedAgent],
+      });
+      console.log("✅ IntelligentSettlement verified!");
+    } catch (error) {
+      console.log("⚠️  IntelligentSettlement verification failed (this is OK if contract is already verified):", error.message);
     }
   }
 
@@ -88,13 +108,18 @@ async function main() {
   console.log("\n📋 Next Steps:");
   console.log("1. Update facilitator address if using zero address");
   console.log("2. Register DEX routers using router.registerDEX()");
-  console.log("3. Test the contract with a small swap");
-  console.log("4. Update frontend with router address:", routerAddress);
+  console.log("3. Test the contracts with a small swap");
+  console.log("4. Update backend .env with:");
+  console.log(`   INTELLIGENT_SETTLEMENT_CONTRACT=${settlementAddress}`);
+  console.log(`   SETTLEMENT_AGENT_PRIVATE_KEY=<agent_private_key>`);
+  console.log("5. Update frontend with router address:", routerAddress);
   console.log("\n📊 View on explorer:");
   if (network.chainId === 338n) {
-    console.log(`   https://testnet.cronoscan.com/address/${routerAddress}`);
+    console.log(`   Router: https://testnet.cronoscan.com/address/${routerAddress}`);
+    console.log(`   Settlement: https://testnet.cronoscan.com/address/${settlementAddress}`);
   } else if (network.chainId === 25n) {
-    console.log(`   https://cronoscan.com/address/${routerAddress}`);
+    console.log(`   Router: https://cronoscan.com/address/${routerAddress}`);
+    console.log(`   Settlement: https://cronoscan.com/address/${settlementAddress}`);
   }
   console.log("\n");
 }

@@ -1,4 +1,4 @@
-import { Home, Shuffle, Cpu, Settings, User, Folder, BarChart, CreditCard, type LucideIcon } from 'lucide-react';
+import { Home, Shuffle, Cpu, Settings, User, Folder, BarChart, CreditCard, ShieldCheck, type LucideIcon } from 'lucide-react';
 
 export type AppRoute = {
   key: string;
@@ -32,6 +32,7 @@ export const APP_ROUTES: AppRoute[] = [
     ]
   },
   { key: 'settlement', title: 'Settlement', path: '/settlement', icon: CreditCard },
+  { key: 'payment-review', title: 'Payment Review', path: '/payment-review', icon: ShieldCheck, requiresAuth: true },
   { key: 'app', title: 'CLEO App', path: '/app', icon: Shuffle },
   { key: 'settings', title: 'Settings', path: '/settings', icon: Settings },
   { key: 'account', title: 'Account', path: '/account', icon: User }
