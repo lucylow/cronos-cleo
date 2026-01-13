@@ -571,25 +571,22 @@ export async function getDashboardMetrics(
  * Get agent status
  */
 export async function getAgentStatus(options?: RequestOptions): Promise<any> {
-  try {
-    return await fetchWithRetry(
-      `${API_BASE_URL}/api/agent/status`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+  return await fetchWithRetry(
+    `${API_BASE_URL}/api/agent/status`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      {
-        ...options,
-        cache: options?.cache ?? true,
-        cacheTTL: options?.cacheTTL ?? 10000, // 10 seconds
-      }
-    );
-  } catch (error: any) {
-    console.error('Error fetching agent status:', error);
-    return null;
-  }
+    },
+    {
+      ...options,
+      retries: options?.retries ?? 0, // No retries for faster fallback
+      timeout: options?.timeout ?? 3000, // 3 second timeout
+      cache: options?.cache ?? true,
+      cacheTTL: options?.cacheTTL ?? 10000,
+    }
+  );
 }
 
 /**
