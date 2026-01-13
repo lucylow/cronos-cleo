@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
 import { DAO_ABI } from '@/lib/daoAbi';
 import { DAO_ADDRESS_TESTNET, DAO_ADDRESS_MAINNET } from '@/lib/daoConstants';
@@ -28,15 +28,29 @@ export default function CreateProposalPage() {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [hasNavigated, setHasNavigated] = useState(false);
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract();
   const { isLoading: waiting, isSuccess } = useWaitForTransactionReceipt({
     hash: txHash,
-    onSuccess: () => {
+  });
+
+  // Handle success navigation
+  useEffect(() => {
+    if (isSuccess && txHash && !hasNavigated) {
+      setHasNavigated(true);
       toast.success('Proposal created successfully!');
       navigate('/dao');
-    },
-  });
+    }
+  }, [isSuccess, txHash, hasNavigated, navigate]);
+
+  // Handle write error
+  useEffect(() => {
+    if (writeError) {
+      setError(writeError.message);
+      toast.error('Proposal creation failed: ' + writeError.message);
+    }
+  }, [writeError]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,20 +78,13 @@ export default function CreateProposalPage() {
     }
     setError(null);
 
-    writeContract(
-      {
-        address: daoAddress as `0x${string}`,
-        abi: DAO_ABI,
-        functionName: 'proposeTreasuryETHTransfer',
-        args: [recipient as `0x${string}`, parseEther(amount), description],
-      },
-      {
-        onError: (err) => {
-          setError(err.message);
-          toast.error('Proposal creation failed: ' + err.message);
-        },
-      },
-    );
+    // Use type assertion to work around wagmi's strict typing
+    (writeContract as (config: unknown) => void)({
+      address: daoAddress as `0x${string}`,
+      abi: DAO_ABI,
+      functionName: 'proposeTreasuryETHTransfer',
+      args: [recipient as `0x${string}`, parseEther(amount), description],
+    });
   };
 
   return (

@@ -10,9 +10,8 @@ import {
 } from 'wagmi';
 import { DAO_ABI } from '@/lib/daoAbi';
 import { DAO_ADDRESS_TESTNET, DAO_ADDRESS_MAINNET } from '@/lib/daoConstants';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { parseEther } from 'viem';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -48,12 +47,27 @@ export default function ProposalDetailPage() {
     },
   });
 
-  const { writeContract, data: txHash, isPending, error } = useWriteContract();
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract();
   const { isLoading: waiting, isSuccess } = useWaitForTransactionReceipt({
     hash: txHash,
   });
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Handle write success
+  useEffect(() => {
+    if (isSuccess && txHash) {
+      toast.success('Transaction confirmed!');
+    }
+  }, [isSuccess, txHash]);
+
+  // Handle write error
+  useEffect(() => {
+    if (writeError) {
+      setErrorMessage(writeError.message);
+      toast.error('Transaction failed: ' + writeError.message);
+    }
+  }, [writeError]);
 
   if (isLoading) {
     return (
@@ -82,87 +96,50 @@ export default function ProposalDetailPage() {
     );
   }
 
-  const [
-    _id,
-    proposer,
-    startTime,
-    endTime,
-    forVotes,
-    againstVotes,
-    abstainVotes,
-    status,
-    pType,
-    target,
-    value,
-    token,
-    recipient,
-    _callData,
-    description,
-  ] = proposal as any[];
+  // Handle both array and object responses from contract
+  const proposalData = proposal as unknown;
+  let _id: bigint, proposer: string, startTime: bigint, endTime: bigint, forVotes: bigint, againstVotes: bigint, abstainVotes: bigint, status: number, pType: number, target: string, value: bigint, token: string, recipient: string, _callData: string, description: string;
+  
+  if (Array.isArray(proposalData)) {
+    [_id, proposer, startTime, endTime, forVotes, againstVotes, abstainVotes, status, pType, target, value, token, recipient, _callData, description] = proposalData as [bigint, string, bigint, bigint, bigint, bigint, bigint, number, number, string, bigint, string, string, string, string];
+  } else {
+    const p = proposalData as { id: bigint; proposer: string; startTime: bigint; endTime: bigint; forVotes: bigint; againstVotes: bigint; abstainVotes: bigint; status: number; pType: number; target: string; value: bigint; token: string; recipient: string; callData: string; description: string };
+    _id = p.id; proposer = p.proposer; startTime = p.startTime; endTime = p.endTime; forVotes = p.forVotes; againstVotes = p.againstVotes; abstainVotes = p.abstainVotes; status = p.status; pType = p.pType; target = p.target; value = p.value; token = p.token; recipient = p.recipient; _callData = p.callData; description = p.description;
+  }
 
   const supportLabels = ['Against', 'For', 'Abstain'];
 
+  // Use type assertion to work around wagmi's strict typing
+  const writeContractTyped = writeContract as (config: unknown) => void;
+
   const handleVote = (support: 0 | 1 | 2) => {
     setErrorMessage(null);
-    writeContract(
-      {
-        address: daoAddress as `0x${string}`,
-        abi: DAO_ABI,
-        functionName: 'vote',
-        args: [proposalId, support],
-      },
-      {
-        onSuccess: () => {
-          toast.success('Vote submitted!');
-        },
-        onError: (err) => {
-          setErrorMessage(err.message);
-          toast.error('Vote failed: ' + err.message);
-        },
-      },
-    );
+    writeContractTyped({
+      address: daoAddress as `0x${string}`,
+      abi: DAO_ABI,
+      functionName: 'vote',
+      args: [proposalId, support],
+    });
   };
 
   const handleExecute = () => {
     setErrorMessage(null);
-    writeContract(
-      {
-        address: daoAddress as `0x${string}`,
-        abi: DAO_ABI,
-        functionName: 'execute',
-        args: [proposalId],
-      },
-      {
-        onSuccess: () => {
-          toast.success('Proposal executed!');
-        },
-        onError: (err) => {
-          setErrorMessage(err.message);
-          toast.error('Execution failed: ' + err.message);
-        },
-      },
-    );
+    writeContractTyped({
+      address: daoAddress as `0x${string}`,
+      abi: DAO_ABI,
+      functionName: 'execute',
+      args: [proposalId],
+    });
   };
 
   const handleFinalize = () => {
     setErrorMessage(null);
-    writeContract(
-      {
-        address: daoAddress as `0x${string}`,
-        abi: DAO_ABI,
-        functionName: 'finalizeProposal',
-        args: [proposalId],
-      },
-      {
-        onSuccess: () => {
-          toast.success('Proposal finalized!');
-        },
-        onError: (err) => {
-          setErrorMessage(err.message);
-          toast.error('Finalization failed: ' + err.message);
-        },
-      },
-    );
+    writeContractTyped({
+      address: daoAddress as `0x${string}`,
+      abi: DAO_ABI,
+      functionName: 'finalizeProposal',
+      args: [proposalId],
+    });
   };
 
   const now = Date.now();
@@ -266,9 +243,9 @@ export default function ProposalDetailPage() {
                 Transaction: {txHash.slice(0, 10)}... (status: {waiting ? 'Confirming' : isSuccess ? 'Confirmed' : 'Sent'})
               </p>
             )}
-            {(errorMessage || error) && (
+            {(errorMessage || writeError) && (
               <p className="text-xs text-destructive">
-                {errorMessage || error?.message}
+                {errorMessage || writeError?.message}
               </p>
             )}
           </div>
