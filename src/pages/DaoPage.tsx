@@ -85,6 +85,7 @@ function ProposalRow({ id, daoAddress }: { id: bigint; daoAddress: `0x${string}`
     );
   }
 
+  const dataArray = [...(data as readonly unknown[])] as unknown[];
   const [
     _id,
     proposer,
@@ -101,7 +102,7 @@ function ProposalRow({ id, daoAddress }: { id: bigint; daoAddress: `0x${string}`
     recipient,
     _callData,
     description,
-  ] = data as any[];
+  ] = dataArray as [bigint, string, bigint, bigint, bigint, bigint, bigint, number, number, string, bigint, string, string, string, string];
 
   const now = Date.now();
   const end = Number(endTime) * 1000;
