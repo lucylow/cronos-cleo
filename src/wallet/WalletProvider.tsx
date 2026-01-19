@@ -44,7 +44,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return addr.slice(0, 6) + "..." + addr.slice(-4);
   };
 
-  const initializeFromWindow = useCallback(async (ethereum: any) => {
+  const fetchBalance = useCallback(async (bProvider: BrowserProvider, address: string) => {
+    try {
+      const bal = await bProvider.getBalance(address);
+      setBalance(ethers.formatUnits(bal, 18));
+    } catch (e) {
+      console.error("Failed to fetch balance", e);
+      setBalance(null);
+    }
+  }, []);
+
+  const initializeFromWindow = useCallback(async (ethereum: typeof window.ethereum) => {
     if (!ethereum) return;
     try {
       const bProvider = new ethers.BrowserProvider(ethereum);
@@ -55,43 +65,66 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setAccount(address);
       const net = await bProvider.getNetwork();
       setChainId(net.chainId);
-      const bal = await bProvider.getBalance(address);
-      setBalance(ethers.formatUnits(bal, 18));
+      await fetchBalance(bProvider, address);
     } catch (e) {
       console.error("initializeFromWindow failed", e);
+      // Don't throw here, just log - let the connect function handle errors
     }
-  }, []);
+  }, [fetchBalance]);
 
   const connect = useCallback(async () => {
-    if (!(window as any)?.ethereum) {
-      throw new Error("No wallet found. Please install MetaMask.");
+    if (!window.ethereum) {
+      throw new Error("No wallet found. Please install MetaMask or another Web3 wallet.");
     }
     setConnecting(true);
     try {
-      await (window as any).ethereum.request({ method: "eth_requestAccounts" });
-      await initializeFromWindow((window as any).ethereum);
-
-      // Try to switch to Cronos
+      // Request account access
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      
+      // Try to switch to Cronos first (before initializing)
       try {
-        await (window as any).ethereum.request({
+        await window.ethereum.request({
           method: "wallet_switchEthereumChain",
           params: [{ chainId: CRONOS_MAINNET.chainIdHex }],
         });
       } catch (switchError: any) {
+        // This error code indicates that the chain has not been added to MetaMask
         if (switchError?.code === 4902) {
-          await (window as any).ethereum.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: CRONOS_MAINNET.chainIdHex,
-              chainName: CRONOS_MAINNET.chainName,
-              rpcUrls: CRONOS_MAINNET.rpcUrls,
-              nativeCurrency: CRONOS_MAINNET.nativeCurrency,
-              blockExplorerUrls: CRONOS_MAINNET.blockExplorerUrls
-            }],
-          });
+          try {
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [{
+                chainId: CRONOS_MAINNET.chainIdHex,
+                chainName: CRONOS_MAINNET.chainName,
+                rpcUrls: CRONOS_MAINNET.rpcUrls,
+                nativeCurrency: CRONOS_MAINNET.nativeCurrency,
+                blockExplorerUrls: CRONOS_MAINNET.blockExplorerUrls
+              }],
+            });
+          } catch (addError) {
+            console.error("Failed to add Cronos chain", addError);
+            throw new Error("Failed to add Cronos network to wallet");
+          }
+        } else if (switchError?.code === 4001) {
+          // User rejected the request
+          throw new Error("Please switch to Cronos network to continue");
+        } else {
+          console.error("Failed to switch to Cronos", switchError);
+          // Continue anyway - user might want to use a different chain
         }
       }
+      
+      // Initialize provider after chain switch
+      await initializeFromWindow(window.ethereum);
+      
       localStorage.setItem(LOCAL_KEY, "1");
+    } catch (error: any) {
+      console.error("Wallet connection failed", error);
+      // Re-throw with a user-friendly message
+      if (error?.message) {
+        throw error;
+      }
+      throw new Error("Failed to connect wallet. Please try again.");
     } finally {
       setConnecting(false);
     }
@@ -108,31 +141,62 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const tryAuto = async () => {
-      if (localStorage.getItem(LOCAL_KEY) && (window as any)?.ethereum) {
+      if (localStorage.getItem(LOCAL_KEY) && window.ethereum) {
         try {
-          await initializeFromWindow((window as any).ethereum);
+          // Check if we have permission to access accounts
+          const accounts = await window.ethereum.request({ method: "eth_accounts" });
+          if (accounts && accounts.length > 0) {
+            await initializeFromWindow(window.ethereum);
+          } else {
+            // No accounts available, clear the stored connection
+            localStorage.removeItem(LOCAL_KEY);
+          }
         } catch (e) {
+          console.error("Auto-connect failed", e);
           localStorage.removeItem(LOCAL_KEY);
         }
       }
     };
     tryAuto();
 
-    const ethereum = (window as any)?.ethereum;
+    const ethereum = window.ethereum;
     if (ethereum?.on) {
-      const handleAccountsChanged = (accounts: string[]) => {
-        if (!accounts.length) disconnect();
-        else setAccount(accounts[0]);
+      const handleAccountsChanged = async (accounts: string[]) => {
+        if (!accounts.length) {
+          disconnect();
+        } else {
+          // Account changed, update account and refresh balance
+          setAccount(accounts[0]);
+          if (provider) {
+            const address = accounts[0];
+            await fetchBalance(provider, address);
+          } else if (window.ethereum) {
+            // Re-initialize if provider is not set
+            await initializeFromWindow(window.ethereum);
+          }
+        }
       };
-      const handleChainChanged = () => window.location.reload();
+      
+      const handleChainChanged = async () => {
+        // Chain changed, re-initialize to get new chain ID and balance
+        if (window.ethereum) {
+          await initializeFromWindow(window.ethereum);
+        }
+        // Optionally reload page for a clean state
+        // window.location.reload();
+      };
+      
       ethereum.on("accountsChanged", handleAccountsChanged);
       ethereum.on("chainChanged", handleChainChanged);
+      
       return () => {
-        ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
-        ethereum.removeListener?.("chainChanged", handleChainChanged);
+        if (ethereum.removeListener) {
+          ethereum.removeListener("accountsChanged", handleAccountsChanged);
+          ethereum.removeListener("chainChanged", handleChainChanged);
+        }
       };
     }
-  }, [initializeFromWindow, disconnect]);
+  }, [initializeFromWindow, disconnect, provider, fetchBalance]);
 
   return (
     <WalletContext.Provider value={{ provider, signer, account, chainId, balance, connecting, connect, disconnect, shorten }}>

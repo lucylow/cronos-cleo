@@ -328,7 +328,7 @@ export function CLEOSwapInterface() {
             </div>
 
             {/* Metrics */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Predicted Slippage</Label>
                 <div className="text-2xl font-bold">{estimatedSlippage}%</div>
@@ -379,40 +379,47 @@ export function CLEOSwapInterface() {
               </div>
             </div>
 
-            {/* Execute Button */}
-            <div className="space-y-2">
-              <Button
-                onClick={handleExecute}
-                disabled={!isConnected || isExecuting}
-                className="w-full"
-                size="lg"
-              >
-                {isExecuting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Executing...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Execute Optimized Swap
-                  </>
-                )}
-              </Button>
-              {isExecuting && abortController && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => abortController.abort()}
-                  className="w-full"
-                >
-                  Cancel Execution
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                {/* Execute Button */}
+                <div className="space-y-3 pt-2">
+                  <Button
+                    onClick={handleExecute}
+                    disabled={!isConnected || isExecuting}
+                    className="w-full h-12 bg-gradient-primary hover:shadow-glow transition-all duration-300 text-base font-semibold"
+                    size="lg"
+                  >
+                    {isExecuting ? (
+                      <>
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                        Executing...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="mr-2 h-5 w-5" />
+                        Execute Optimized Swap
+                      </>
+                    )}
+                  </Button>
+                  {isExecuting && abortController && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                    >
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => abortController.abort()}
+                        className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
+                      >
+                        Cancel Execution
+                      </Button>
+                    </motion.div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {!isConnected && (
         <Alert>

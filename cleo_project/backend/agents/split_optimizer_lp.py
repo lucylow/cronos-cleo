@@ -22,10 +22,10 @@ class SplitOptimizerAgent(BaseAgent):
     
     async def execute(self, request: Dict) -> Dict:
         """
-        Execute split optimization using linear programming
+        Execute split optimization using linear programming enhanced with AI predictions
         
         Args:
-            request: Dict with 'liquidity_data', 'total_amount', 'slippage_tolerance'
+            request: Dict with 'liquidity_data', 'total_amount', 'slippage_tolerance', optional 'ai_predictions'
             
         Returns:
             Dict with optimized routes, predicted slippage, and confidence
@@ -36,6 +36,7 @@ class SplitOptimizerAgent(BaseAgent):
         slippage_tolerance = request.get("slippage_tolerance", 0.005)
         input_token = request.get("input_token", "")
         output_token = request.get("output_token", "")
+        ai_predictions = request.get("ai_predictions", {})
         
         if not pools or total_amount <= 0:
             return {
@@ -46,12 +47,41 @@ class SplitOptimizerAgent(BaseAgent):
                 "confidence": 0.0
             }
         
+        # Extract AI predictions if available
+        ai_predicted_slippage = None
+        ai_success_prob = None
+        ai_confidence = 0.0
+        
+        if ai_predictions:
+            ai_predicted_slippage = ai_predictions.get("predicted_slippage")
+            ai_success_prob = ai_predictions.get("success_probability")
+            recommendation = ai_predictions.get("recommendation", {})
+            ai_confidence = 0.85  # AI-enhanced confidence
+        
         # Linear programming setup: minimize total slippage
         n_dexes = len(pools)
         
         # Objective function: minimize weighted slippage
-        # Use impact_50k as proxy for slippage cost
-        c = np.array([p.get("impact_50k", 1.0) for p in pools])
+        # Enhanced with AI predictions if available
+        cost_factors = []
+        for i, p in enumerate(pools):
+            base_cost = p.get("impact_50k", 1.0)
+            
+            # Adjust cost based on AI predictions if available
+            if ai_predicted_slippage is not None and ai_success_prob is not None:
+                # Penalize pools that would contribute to higher predicted slippage
+                pool_impact = p.get("impact_50k", 0.0)
+                if pool_impact > ai_predicted_slippage:
+                    base_cost *= 1.2  # Penalize high-impact pools
+            
+            # Adjust based on success probability
+            if ai_success_prob is not None and ai_success_prob < 0.7:
+                # If success probability is low, prefer safer pools
+                base_cost *= (1 + (0.7 - ai_success_prob))
+            
+            cost_factors.append(base_cost)
+        
+        c = np.array(cost_factors)
         
         # Constraints: sum(weights) = 1, each weight >= 0
         A_eq = np.ones((1, n_dexes))
@@ -109,20 +139,47 @@ class SplitOptimizerAgent(BaseAgent):
                 predicted_total_out += expected_out
         
         # Calculate predicted slippage
-        if total_amount > 0 and predicted_total_out > 0:
-            # Simple slippage calculation based on price impact
+        if ai_predicted_slippage is not None:
+            # Use AI prediction if available, weighted with calculated slippage
+            calculated_slippage = 0.0
+            if total_amount > 0 and predicted_total_out > 0:
+                ideal_output = (total_amount * pools[0].get("reserve_out", 1)) / max(pools[0].get("reserve_in", 1), 1)
+                calculated_slippage = abs((ideal_output - predicted_total_out) / ideal_output) * 100
+            
+            # Weighted average: 70% AI prediction, 30% calculated
+            predicted_slippage = (ai_predicted_slippage * 0.7) + (calculated_slippage * 0.3)
+        elif total_amount > 0 and predicted_total_out > 0:
+            # Fallback to calculated slippage
             ideal_output = (total_amount * pools[0].get("reserve_out", 1)) / max(pools[0].get("reserve_in", 1), 1)
             predicted_slippage = abs((ideal_output - predicted_total_out) / ideal_output) * 100
         else:
             predicted_slippage = 0.0
         
-        return {
+        # Calculate confidence score
+        if ai_predictions:
+            confidence = max(ai_confidence, 0.85)  # Enhanced confidence with AI
+        else:
+            confidence = 0.75  # Base confidence without AI
+        
+        # Adjust confidence based on number of routes and success probability
+        if ai_success_prob is not None:
+            confidence = (confidence + ai_success_prob) / 2
+        
+        result = {
             "routes": routes,
             "predicted_slippage": predicted_slippage,
             "predicted_total_out": predicted_total_out,
-            "optimization_method": "linear_programming",
-            "confidence": 0.92  # ML confidence score
+            "optimization_method": "ai_enhanced_linear_programming" if ai_predictions else "linear_programming",
+            "confidence": min(confidence, 0.98)  # Cap at 98%
         }
+        
+        # Add AI insights if available
+        if ai_predictions:
+            result["ai_enhanced"] = True
+            result["ai_predicted_slippage"] = ai_predicted_slippage
+            result["ai_success_probability"] = ai_success_prob
+        
+        return result
     
     def _calculate_min_output(self, reserve_in: int, reserve_out: int, 
                               amount_in: int, tolerance: float) -> int:

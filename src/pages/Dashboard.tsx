@@ -1,8 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle } from 'lucide-react';
+import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { api, ApiClientError } from '@/lib/api';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 
 interface DashboardMetrics {
   total_volume_usd?: number;
@@ -26,29 +33,80 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number }>>([]);
+
+  const fetchMetrics = useCallback(async (showRefreshing = false) => {
+    try {
+      setError(null);
+      if (showRefreshing) {
+        setIsRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      const data = await api.getDashboardMetrics();
+      setMetrics(data);
+      setLastUpdate(new Date());
+      
+      // Add to history for chart (keep last 24 data points)
+      if (data.total_volume_usd !== undefined && data.total_executions !== undefined && data.avg_savings_pct !== undefined) {
+        setMetricsHistory(prev => {
+          const newEntry = {
+            timestamp: Date.now(),
+            volume: data.total_volume_usd || 0,
+            executions: data.total_executions || 0,
+            savings: data.avg_savings_pct || 0
+          };
+          const updated = [...prev, newEntry].slice(-24);
+          return updated;
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof ApiClientError 
+        ? err.message 
+        : 'Failed to load dashboard metrics';
+      console.error('Failed to load dashboard metrics:', err);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        setError(null);
-        const data = await api.getDashboardMetrics();
-        setMetrics(data);
-      } catch (err) {
-        const errorMessage = err instanceof ApiClientError 
-          ? err.message 
-          : 'Failed to load dashboard metrics';
-        console.error('Failed to load dashboard metrics:', err);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchMetrics();
     // Refresh every 30 seconds
-    const interval = setInterval(fetchMetrics, 30000);
+    const interval = setInterval(() => fetchMetrics(false), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchMetrics]);
+
+  // Keyboard shortcut for refresh (R key)
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if ((e.key === 'r' || e.key === 'R') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        fetchMetrics(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [fetchMetrics]);
+
+  // Export metrics as JSON
+  const handleExport = useCallback(() => {
+    if (!metrics) return;
+    const dataStr = JSON.stringify(metrics, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `dashboard-metrics-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [metrics]);
 
   const formatCurrency = (value: number) => {
     if (value >= 1000000) {
@@ -57,132 +115,395 @@ export default function Dashboard() {
     return `$${value.toLocaleString()}`;
   };
 
+  const cardVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: (i: number) => ({
+      opacity: 1,
+      y: 0,
+      transition: { delay: i * 0.1, duration: 0.4 }
+    })
+  };
+
+  const chartData = useMemo(() => {
+    return metricsHistory.map((entry, idx) => ({
+      time: new Date(entry.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      volume: entry.volume,
+      executions: entry.executions,
+      savings: entry.savings,
+      index: idx
+    }));
+  }, [metricsHistory]);
+
+  const chartConfig = useMemo(() => ({
+    volume: {
+      label: 'Volume (USD)',
+      color: 'hsl(var(--primary))',
+    },
+    executions: {
+      label: 'Executions',
+      color: 'hsl(var(--secondary))',
+    },
+    savings: {
+      label: 'Avg Savings %',
+      color: 'hsl(var(--accent))',
+    },
+  }), []);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground">Cross-DEX Liquidity Execution Overview</p>
-      </div>
+    <TooltipProvider>
+      <div className="space-y-6">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div>
+            <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard</h1>
+            <p className="text-muted-foreground text-lg">Cross-DEX Liquidity Execution Overview</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {lastUpdate && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className={`h-2 w-2 rounded-full ${isRefreshing ? 'animate-pulse bg-primary' : 'bg-green-500'}`} />
+                    <span>Last updated: {lastUpdate.toLocaleTimeString()}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Auto-refreshes every 30 seconds</p>
+                  <p className="text-xs mt-1">Press Ctrl+R / Cmd+R to refresh</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchMetrics(true)}
+              disabled={isRefreshing || loading}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            {metrics && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExport}
+                    className="gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Export metrics as JSON</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        </motion.div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 w-4 rounded" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-8 w-32 mb-2" />
+                  <Skeleton className="h-3 w-20" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {[...Array(2)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-6 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {[...Array(3)].map((_, j) => (
+                      <Skeleton key={j} className="h-16 w-full" />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       ) : error ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex items-center justify-between">
+            <span>{error}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                fetchMetrics();
+              }}
+              className="ml-4"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Total Volume</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {metrics?.total_volume_usd ? formatCurrency(metrics.total_volume_usd) : '$0'}
-                </div>
-                <p className="text-xs text-muted-foreground">All-time volume</p>
-              </CardContent>
-            </Card>
+            <motion.div
+              custom={0}
+              initial="hidden"
+              animate="visible"
+              variants={cardVariants}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Card className="relative overflow-hidden border-border/50 hover:border-primary/30 transition-all duration-300 group cursor-pointer">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        Total Volume
+                        <Info className="h-3 w-3 opacity-50" />
+                      </CardTitle>
+                      <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                        <TrendingUp className="h-4 w-4 text-primary" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="relative z-10">
+                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                        {metrics?.total_volume_usd ? formatCurrency(metrics.total_volume_usd) : '$0'}
+                      </div>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <ArrowUpRight className="h-3 w-3 text-green-500" />
+                        All-time volume
+                      </p>
+                    </CardContent>
+                  </Card>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold mb-1">Total Volume (USD)</p>
+                  <p className="text-xs">Cumulative trading volume across all DEX executions processed by the agent.</p>
+                </TooltipContent>
+              </Tooltip>
+            </motion.div>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Executions</CardTitle>
-                <Zap className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {metrics?.total_executions?.toLocaleString() || '0'}
-                </div>
-                <p className="text-xs text-muted-foreground">Total successful swaps</p>
-              </CardContent>
-            </Card>
+            <motion.div
+              custom={1}
+              initial="hidden"
+              animate="visible"
+              variants={cardVariants}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Card className="relative overflow-hidden border-border/50 hover:border-secondary/30 transition-all duration-300 group cursor-pointer">
+                    <div className="absolute inset-0 bg-gradient-to-br from-secondary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        Executions
+                        <Info className="h-3 w-3 opacity-50" />
+                      </CardTitle>
+                      <div className="p-2 rounded-lg bg-secondary/10 group-hover:bg-secondary/20 transition-colors">
+                        <Zap className="h-4 w-4 text-secondary" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="relative z-10">
+                      <div className="text-3xl font-bold mb-1">
+                        {metrics?.total_executions?.toLocaleString() || '0'}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Total successful swaps</p>
+                    </CardContent>
+                  </Card>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold mb-1">Total Executions</p>
+                  <p className="text-xs">Number of successful multi-DEX swap executions completed by the routing agent.</p>
+                </TooltipContent>
+              </Tooltip>
+            </motion.div>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Avg Savings</CardTitle>
-                <PieChart className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {metrics?.avg_savings_pct?.toFixed(1) || '0.0'}%
-                </div>
-                <p className="text-xs text-muted-foreground">vs single-DEX routing</p>
-              </CardContent>
-            </Card>
+            <motion.div
+              custom={2}
+              initial="hidden"
+              animate="visible"
+              variants={cardVariants}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Card className="relative overflow-hidden border-border/50 hover:border-accent/30 transition-all duration-300 group cursor-pointer">
+                    <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        Avg Savings
+                        <Info className="h-3 w-3 opacity-50" />
+                      </CardTitle>
+                      <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                        <PieChart className="h-4 w-4 text-accent" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="relative z-10">
+                      <div className="text-3xl font-bold mb-1 text-green-500 flex items-center gap-2">
+                        {metrics?.avg_savings_pct?.toFixed(1) || '0.0'}%
+                        <ArrowUpRight className="h-5 w-5" />
+                      </div>
+                      <p className="text-xs text-muted-foreground">vs single-DEX routing</p>
+                    </CardContent>
+                  </Card>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold mb-1">Average Savings Percentage</p>
+                  <p className="text-xs">Average cost savings achieved by multi-DEX routing compared to using a single DEX. This includes better prices and reduced slippage.</p>
+                </TooltipContent>
+              </Tooltip>
+            </motion.div>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Agent Status</CardTitle>
-                <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`} />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold ${metrics?.agent_status === 'active' ? 'text-green-500' : ''}`}>
-                  {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
-                </div>
-                <p className="text-xs text-muted-foreground">AI routing status</p>
-              </CardContent>
-            </Card>
+            <motion.div
+              custom={3}
+              initial="hidden"
+              animate="visible"
+              variants={cardVariants}
+            >
+              <Card className="relative overflow-hidden border-border/50 transition-all duration-300 group">
+                <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity`} />
+                <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Agent Status</CardTitle>
+                  <div className={`p-2 rounded-lg transition-colors ${metrics?.agent_status === 'active' ? 'bg-green-500/10 group-hover:bg-green-500/20' : 'bg-muted/20'}`}>
+                    <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
+                  </div>
+                </CardHeader>
+                <CardContent className="relative z-10">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`text-2xl font-bold ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`}>
+                      {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
+                    </div>
+                    {metrics?.agent_status === 'active' && (
+                      <Badge variant="outline" className="border-green-500/30 text-green-500 text-xs px-2 py-0">
+                        Live
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">AI routing status</p>
+                </CardContent>
+              </Card>
+            </motion.div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Executions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {metrics?.recent_executions && metrics.recent_executions.length > 0 ? (
-                  <div className="space-y-2">
-                    {metrics.recent_executions.slice(0, 5).map((exec) => (
-                      <div key={exec.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                        <div>
-                          <p className="text-sm font-medium">
-                            {exec.amount_in.toLocaleString()} {exec.token_in} → {exec.token_out}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(exec.timestamp * 1000).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-medium text-green-600">
-                            +{exec.savings_pct.toFixed(2)}%
-                          </p>
-                          <p className="text-xs text-muted-foreground capitalize">{exec.status}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No recent executions to display.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Agent Health</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Status</span>
-                    <span className={`text-sm font-medium ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`}>
-                      {metrics?.agent_status === 'active' ? 'Operational' : 'Offline'}
-                    </span>
-                  </div>
-                  {metrics?.success_rate && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Success Rate</span>
-                      <span className="text-sm font-medium">{metrics.success_rate.toFixed(1)}%</span>
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.4, duration: 0.4 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-primary" />
+                    Recent Executions
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {metrics?.recent_executions && metrics.recent_executions.length > 0 ? (
+                    <div className="space-y-3">
+                      {metrics.recent_executions.slice(0, 5).map((exec, idx) => (
+                        <motion.div
+                          key={exec.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.5 + idx * 0.05 }}
+                          className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                              <Zap className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium flex items-center gap-2">
+                                <span>{exec.amount_in.toLocaleString()} {exec.token_in}</span>
+                                <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                <span>{exec.token_out}</span>
+                              </p>
+                              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                <Clock className="h-3 w-3" />
+                                {new Date(exec.timestamp * 1000).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <Badge variant="outline" className="border-green-500/30 text-green-500 mb-1">
+                              +{exec.savings_pct.toFixed(2)}%
+                            </Badge>
+                            <p className="text-xs text-muted-foreground capitalize">{exec.status}</p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Activity className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">No recent executions to display.</p>
+                      <p className="text-xs text-muted-foreground/70 mt-1">Start trading to see your execution history</p>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.4, duration: 0.4 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <PieChart className="h-5 w-5 text-secondary" />
+                    Agent Health
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                      <span className="text-sm font-medium text-muted-foreground">Status</span>
+                      <Badge 
+                        variant={metrics?.agent_status === 'active' ? 'default' : 'secondary'}
+                        className={metrics?.agent_status === 'active' ? 'bg-green-500/20 text-green-500 border-green-500/30' : ''}
+                      >
+                        {metrics?.agent_status === 'active' ? 'Operational' : 'Offline'}
+                      </Badge>
+                    </div>
+                    {metrics?.success_rate !== undefined && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Success Rate</span>
+                          <span className="text-lg font-bold text-foreground">{metrics.success_rate.toFixed(1)}%</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${metrics.success_rate}%` }}
+                            transition={{ delay: 0.6, duration: 0.8, ease: "easeOut" }}
+                            className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
           </div>
         </>
       )}

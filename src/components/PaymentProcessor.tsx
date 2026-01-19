@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
-import { Loader2, CheckCircle2, XCircle, Wallet, History, Zap, Copy, ExternalLink } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Wallet, History, Zap, Copy, ExternalLink, Plus, X, Layers } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 

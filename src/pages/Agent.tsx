@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Cpu, Activity, Clock, CheckCircle, Loader2, AlertCircle, Info } from 'lucide-react';
+import { Cpu, Activity, Clock, CheckCircle, Loader2, AlertCircle, Info, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 
 interface AgentStatus {
@@ -61,22 +63,23 @@ export default function Agent() {
   const [loading, setLoading] = useState(true);
   const [usingMockData, setUsingMockData] = useState(false);
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const data = await api.getAgentStatus();
-        setAgentStatus(data);
-        setUsingMockData(false);
-      } catch (err) {
-        console.error('Failed to load agent status:', err);
-        // Use mock data as fallback
-        setAgentStatus(MOCK_AGENT_STATUS);
-        setUsingMockData(true);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchStatus = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getAgentStatus();
+      setAgentStatus(data);
+      setUsingMockData(false);
+    } catch (err) {
+      console.error('Failed to load agent status:', err);
+      // Use mock data as fallback
+      setAgentStatus(MOCK_AGENT_STATUS);
+      setUsingMockData(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchStatus();
     // Refresh every 10 seconds
     const interval = setInterval(fetchStatus, 10000);
@@ -94,22 +97,58 @@ export default function Agent() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <header>
         <h1 className="text-2xl font-bold text-foreground">AI Agent</h1>
         <p className="text-muted-foreground">Intelligent routing decisions powered by Crypto.com AI Agent SDK</p>
-      </div>
+      </header>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[...Array(3)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 w-4 rounded" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-7 w-28 mb-2" />
+                  <Skeleton className="h-3 w-32" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {[...Array(4)].map((_, i) => (
+                  <Skeleton key={i} className="h-20 w-full" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       ) : (
         <>
           {usingMockData && (
             <Alert>
               <Info className="h-4 w-4" />
-              <AlertDescription>
-                Backend not connected. Showing demo data. Start the backend at <code className="text-xs bg-muted px-1 py-0.5 rounded">cleo_project/backend</code> for live data.
+              <AlertDescription className="flex items-center justify-between">
+                <span>
+                  Backend not connected. Showing demo data. Start the backend at <code className="text-xs bg-muted px-1 py-0.5 rounded">cleo_project/backend</code> for live data.
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={fetchStatus}
+                  className="ml-4"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Retry
+                </Button>
               </AlertDescription>
             </Alert>
           )}
@@ -178,7 +217,11 @@ export default function Agent() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No recent decisions to display.</p>
+                <div className="text-center py-8">
+                  <Cpu className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
+                  <p className="text-sm font-medium text-muted-foreground mb-1">No recent decisions</p>
+                  <p className="text-xs text-muted-foreground">AI agent decisions will appear here</p>
+                </div>
               )}
             </CardContent>
           </Card>

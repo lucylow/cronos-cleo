@@ -4,13 +4,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Payments = () => {
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Payment Processor</h1>
-        <p className="text-muted-foreground">
+    <div className="container mx-auto py-4 sm:py-8 px-4">
+      <header className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold mb-2">Payment Processor</h1>
+        <p className="text-sm sm:text-base text-muted-foreground">
           Accept payments in native CRO or ERC-20 tokens on Cronos with agentic automation
         </p>
-      </div>
+      </header>
       <Tabs defaultValue="processor" className="w-full">
         <TabsList className="grid w-full grid-cols-2 max-w-md mb-6">
           <TabsTrigger value="processor">Payment Processor</TabsTrigger>
