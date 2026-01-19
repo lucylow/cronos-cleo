@@ -66,7 +66,15 @@ export const MOCK_TOKENS: TokenMeta[] = [
   { symbol: 'USDT', name: 'Tether USD', address: '0x000000000000000000000000000000000000USDT', decimals: 6, chain: 'cronos' },
   { symbol: 'WETH', name: 'Wrapped ETH', address: '0x00000000000000000000000000000000WETH00', decimals: 18, chain: 'cronos' },
   { symbol: 'DAI', name: 'Dai Stablecoin', address: '0x00000000000000000000000000000DAI0000', decimals: 18, chain: 'cronos' },
-  { symbol: 'FEE', name: 'Fee-On-Transfer Token', address: '0xFEETOKEN0000000000000000000000000000', decimals: 18, chain: 'cronos', feeOnTransfer: true }
+  { symbol: 'FEE', name: 'Fee-On-Transfer Token', address: '0xFEETOKEN0000000000000000000000000000', decimals: 18, chain: 'cronos', feeOnTransfer: true },
+  { symbol: 'WBTC', name: 'Wrapped BTC', address: '0x00000000000000000000000000000000WBTC00', decimals: 8, chain: 'cronos' },
+  { symbol: 'MATIC', name: 'Polygon', address: '0x000000000000000000000000000000MATIC0', decimals: 18, chain: 'cronos' },
+  { symbol: 'LINK', name: 'Chainlink', address: '0x0000000000000000000000000000000LINK0', decimals: 18, chain: 'cronos' },
+  { symbol: 'UNI', name: 'Uniswap', address: '0x00000000000000000000000000000000UNI00', decimals: 18, chain: 'cronos' },
+  { symbol: 'AAVE', name: 'Aave Token', address: '0x0000000000000000000000000000000AAVE0', decimals: 18, chain: 'cronos' },
+  { symbol: 'ATOM', name: 'Cosmos', address: '0x000000000000000000000000000000ATOM0', decimals: 18, chain: 'cronos' },
+  { symbol: 'VVS', name: 'VVS Finance', address: '0x0000000000000000000000000000000VVS00', decimals: 18, chain: 'cronos' },
+  { symbol: 'MMF', name: 'MM Finance', address: '0x0000000000000000000000000000000MMF00', decimals: 18, chain: 'cronos' }
 ];
 
 export function getToken(symbolOrAddr: string) {
@@ -92,7 +100,20 @@ export type DexPool = {
 const initialPools: DexPool[] = [
   { id: 'pool_vvs_cro_usdc', dex: 'VVS Finance', pair: 'CRO-USDC.e', tokenA: getToken('CRO')!.address, tokenB: getToken('USDC.e')!.address, reserveA: 1_200_000, reserveB: 540_000, feeBps: 25, lastUpdated: nowSeconds(), tvl: 1_200_000 * 0.15 + 540_000 },
   { id: 'pool_crona_cro_usdc', dex: 'CronaSwap', pair: 'CRO-USDC.e', tokenA: getToken('CRO')!.address, tokenB: getToken('USDC.e')!.address, reserveA: 680_000, reserveB: 300_000, feeBps: 30, lastUpdated: nowSeconds(), tvl: 680_000 * 0.15 + 300_000 },
-  { id: 'pool_mm_cro_usdc', dex: 'MM Finance', pair: 'CRO-USDC.e', tokenA: getToken('CRO')!.address, tokenB: getToken('USDC.e')!.address, reserveA: 350_000, reserveB: 165_000, feeBps: 30, lastUpdated: nowSeconds(), tvl: 350_000 * 0.15 + 165_000 }
+  { id: 'pool_mm_cro_usdc', dex: 'MM Finance', pair: 'CRO-USDC.e', tokenA: getToken('CRO')!.address, tokenB: getToken('USDC.e')!.address, reserveA: 350_000, reserveB: 165_000, feeBps: 30, lastUpdated: nowSeconds(), tvl: 350_000 * 0.15 + 165_000 },
+  // Additional CRO pairs
+  { id: 'pool_vvs_cro_usdt', dex: 'VVS Finance', pair: 'CRO-USDT', tokenA: getToken('CRO')!.address, tokenB: getToken('USDT')!.address, reserveA: 950_000, reserveB: 425_000, feeBps: 25, lastUpdated: nowSeconds(), tvl: 950_000 * 0.15 + 425_000 },
+  { id: 'pool_mm_cro_usdt', dex: 'MM Finance', pair: 'CRO-USDT', tokenA: getToken('CRO')!.address, tokenB: getToken('USDT')!.address, reserveA: 420_000, reserveB: 190_000, feeBps: 30, lastUpdated: nowSeconds(), tvl: 420_000 * 0.15 + 190_000 },
+  { id: 'pool_vvs_cro_weth', dex: 'VVS Finance', pair: 'CRO-WETH', tokenA: getToken('CRO')!.address, tokenB: getToken('WETH')!.address, reserveA: 1_500_000, reserveB: 225, feeBps: 25, lastUpdated: nowSeconds(), tvl: 1_500_000 * 0.15 + 225 * 2500 },
+  { id: 'pool_crona_cro_weth', dex: 'CronaSwap', pair: 'CRO-WETH', tokenA: getToken('CRO')!.address, tokenB: getToken('WETH')!.address, reserveA: 880_000, reserveB: 132, feeBps: 30, lastUpdated: nowSeconds(), tvl: 880_000 * 0.15 + 132 * 2500 },
+  // Stablecoin pairs
+  { id: 'pool_vvs_usdc_usdt', dex: 'VVS Finance', pair: 'USDC.e-USDT', tokenA: getToken('USDC.e')!.address, tokenB: getToken('USDT')!.address, reserveA: 2_500_000, reserveB: 2_480_000, feeBps: 5, lastUpdated: nowSeconds(), tvl: 2_500_000 + 2_480_000 },
+  { id: 'pool_mm_usdc_dai', dex: 'MM Finance', pair: 'USDC.e-DAI', tokenA: getToken('USDC.e')!.address, tokenB: getToken('DAI')!.address, reserveA: 1_800_000, reserveB: 1_790_000, feeBps: 5, lastUpdated: nowSeconds(), tvl: 1_800_000 + 1_790_000 },
+  // Other token pairs
+  { id: 'pool_vvs_usdc_weth', dex: 'VVS Finance', pair: 'USDC.e-WETH', tokenA: getToken('USDC.e')!.address, tokenB: getToken('WETH')!.address, reserveA: 3_200_000, reserveB: 1280, feeBps: 25, lastUpdated: nowSeconds(), tvl: 3_200_000 + 1280 * 2500 },
+  { id: 'pool_crona_weth_wbtc', dex: 'CronaSwap', pair: 'WETH-WBTC', tokenA: getToken('WETH')!.address, tokenB: getToken('WBTC')!.address, reserveA: 850, reserveB: 21, feeBps: 30, lastUpdated: nowSeconds(), tvl: 850 * 2500 + 21 * 45000 },
+  { id: 'pool_vvs_cro_link', dex: 'VVS Finance', pair: 'CRO-LINK', tokenA: getToken('CRO')!.address, tokenB: getToken('LINK')!.address, reserveA: 750_000, reserveB: 35_000, feeBps: 25, lastUpdated: nowSeconds(), tvl: 750_000 * 0.15 + 35_000 * 12 },
+  { id: 'pool_mm_cro_atom', dex: 'MM Finance', pair: 'CRO-ATOM', tokenA: getToken('CRO')!.address, tokenB: getToken('ATOM')!.address, reserveA: 620_000, reserveB: 28_000, feeBps: 30, lastUpdated: nowSeconds(), tvl: 620_000 * 0.15 + 28_000 * 8 }
 ];
 
 // Add more exotic pools for edge cases

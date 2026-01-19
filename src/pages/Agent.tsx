@@ -1,16 +1,34 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Cpu, Activity, Clock, CheckCircle, Loader2, AlertCircle, Info, RefreshCw } from 'lucide-react';
+import { Cpu, Activity, Clock, CheckCircle, Loader2, AlertCircle, Info, RefreshCw, Brain, TrendingUp } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
+
+interface AIModelStatus {
+  is_trained?: boolean;
+  version?: string;
+  model_name?: string;
+}
+
+interface AIModels {
+  available?: boolean;
+  initialized?: boolean;
+  models?: Record<string, AIModelStatus>;
+}
 
 interface AgentStatus {
   status?: string;
   available?: boolean;
   decisions_today?: number;
+  successful_decisions?: number;
+  failed_decisions?: number;
+  success_rate?: number;
   avg_response_time_ms?: number;
+  ai_predictions_used?: number;
+  ai_models?: AIModels;
   recent_decisions?: Array<{
     id: string;
     timestamp: number;
@@ -153,7 +171,7 @@ export default function Agent() {
             </Alert>
           )}
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium">Status</CardTitle>
@@ -178,7 +196,28 @@ export default function Agent() {
                 <div className="text-xl font-bold">
                   {agentStatus?.decisions_today?.toLocaleString() || '0'}
                 </div>
-                <p className="text-xs text-muted-foreground">Routing optimizations</p>
+                <p className="text-xs text-muted-foreground">
+                  {agentStatus?.success_rate !== undefined 
+                    ? `Success: ${agentStatus.success_rate.toFixed(1)}%`
+                    : 'Routing optimizations'}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">AI Predictions</CardTitle>
+                <Brain className={`h-4 w-4 ${agentStatus?.ai_models?.initialized ? 'text-blue-500' : 'text-muted-foreground'}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold">
+                  {agentStatus?.ai_predictions_used?.toLocaleString() || '0'}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {agentStatus?.ai_models?.initialized 
+                    ? 'ML models active'
+                    : 'AI models offline'}
+                </p>
               </CardContent>
             </Card>
 
@@ -195,6 +234,57 @@ export default function Agent() {
               </CardContent>
             </Card>
           </div>
+
+          {/* AI Models Status */}
+          {agentStatus?.ai_models && (
+            <Card className="border-blue-200 dark:border-blue-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-blue-500" />
+                  AI Models Status
+                  {agentStatus.ai_models.initialized && (
+                    <Badge variant="outline" className="ml-2 border-green-500 text-green-500">
+                      Active
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {agentStatus.ai_models.available && agentStatus.ai_models.models ? (
+                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                    {Object.entries(agentStatus.ai_models.models).map(([name, model]) => (
+                      <div
+                        key={name}
+                        className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/30"
+                      >
+                        <div className="flex-1">
+                          <p className="text-sm font-medium capitalize">
+                            {name.replace('_', ' ')}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {model.is_trained ? `v${model.version || '1.0'}` : 'Not trained'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={model.is_trained ? 'default' : 'secondary'}
+                          className={model.is_trained ? 'bg-green-500/20 text-green-500 border-green-500/30' : ''}
+                        >
+                          {model.is_trained ? 'Trained' : 'Pending'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <Brain className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      AI models not available
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

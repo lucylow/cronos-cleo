@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 import { api, ApiClientError } from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface DashboardMetrics {
   total_volume_usd?: number;
@@ -376,30 +376,109 @@ export default function Dashboard() {
               animate="visible"
               variants={cardVariants}
             >
-              <Card className="relative overflow-hidden border-border/50 transition-all duration-300 group">
-                <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity`} />
-                <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Agent Status</CardTitle>
-                  <div className={`p-2 rounded-lg transition-colors ${metrics?.agent_status === 'active' ? 'bg-green-500/10 group-hover:bg-green-500/20' : 'bg-muted/20'}`}>
-                    <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
-                  </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Card className="relative overflow-hidden border-border/50 transition-all duration-300 group cursor-pointer">
+                    <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity`} />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        Agent Status
+                        <Info className="h-3 w-3 opacity-50" />
+                      </CardTitle>
+                      <div className={`p-2 rounded-lg transition-colors ${metrics?.agent_status === 'active' ? 'bg-green-500/10 group-hover:bg-green-500/20' : 'bg-muted/20'}`}>
+                        <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="relative z-10">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className={`text-2xl font-bold ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`}>
+                          {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
+                        </div>
+                        {metrics?.agent_status === 'active' && (
+                          <Badge variant="outline" className="border-green-500/30 text-green-500 text-xs px-2 py-0">
+                            Live
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">AI routing status</p>
+                    </CardContent>
+                  </Card>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-semibold mb-1">Agent Status</p>
+                  <p className="text-xs">Current operational status of the AI routing agent. When active, the agent is monitoring liquidity and optimizing routes in real-time.</p>
+                </TooltipContent>
+              </Tooltip>
+            </motion.div>
+          </div>
+
+          {/* Metrics Trend Chart */}
+          {chartData.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5, duration: 0.4 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    Metrics Trends
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="relative z-10">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className={`text-2xl font-bold ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`}>
-                      {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
-                    </div>
-                    {metrics?.agent_status === 'active' && (
-                      <Badge variant="outline" className="border-green-500/30 text-green-500 text-xs px-2 py-0">
-                        Live
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">AI routing status</p>
+                <CardContent>
+                  <ChartContainer config={chartConfig} className="h-[300px]">
+                    <AreaChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="time" 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <YAxis 
+                        yAxisId="left"
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <YAxis 
+                        yAxisId="right" 
+                        orientation="right"
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Area
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="volume"
+                        stroke="hsl(var(--primary))"
+                        fill="hsl(var(--primary))"
+                        fillOpacity={0.2}
+                        strokeWidth={2}
+                      />
+                      <Area
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="executions"
+                        stroke="hsl(var(--secondary))"
+                        fill="hsl(var(--secondary))"
+                        fillOpacity={0.2}
+                        strokeWidth={2}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="savings"
+                        stroke="hsl(var(--accent))"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </AreaChart>
+                  </ChartContainer>
                 </CardContent>
               </Card>
             </motion.div>
-          </div>
+          )}
 
           <div className="grid gap-4 md:grid-cols-2">
             <motion.div
@@ -417,14 +496,16 @@ export default function Dashboard() {
                 <CardContent>
                   {metrics?.recent_executions && metrics.recent_executions.length > 0 ? (
                     <div className="space-y-3">
-                      {metrics.recent_executions.slice(0, 5).map((exec, idx) => (
-                        <motion.div
-                          key={exec.id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.5 + idx * 0.05 }}
-                          className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all group"
-                        >
+                      <AnimatePresence>
+                        {metrics.recent_executions.slice(0, 5).map((exec, idx) => (
+                          <motion.div
+                            key={exec.id}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            transition={{ delay: 0.5 + idx * 0.05 }}
+                            className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all group"
+                          >
                           <div className="flex items-center gap-3">
                             <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
                               <Zap className="h-3.5 w-3.5 text-primary" />
@@ -448,7 +529,8 @@ export default function Dashboard() {
                             <p className="text-xs text-muted-foreground capitalize">{exec.status}</p>
                           </div>
                         </motion.div>
-                      ))}
+                        ))}
+                      </AnimatePresence>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -507,6 +589,8 @@ export default function Dashboard() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </TooltipProvider>
   );
+}
 }

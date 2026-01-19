@@ -1879,26 +1879,57 @@ async def get_dashboard_metrics():
             return dashboard
         except ImportError:
             # Return mock data if performance tracker not available
+            import random
+            
+            # Generate more varied recent executions
+            token_pairs = [
+                ("CRO", "USDC.e"),
+                ("CRO", "USDT"),
+                ("USDC.e", "CRO"),
+                ("CRO", "WETH"),
+                ("USDT", "USDC.e"),
+                ("CRO", "DAI"),
+            ]
+            
+            recent_executions = []
+            now = int(datetime.now().timestamp())
+            
+            for i in range(15):
+                token_in, token_out = random.choice(token_pairs)
+                time_offset = i * random.randint(60, 180)  # 1-3 minutes apart
+                
+                # Varied amounts
+                base_amount = random.randint(5000, 500000)
+                amount_out_multiplier = random.uniform(0.48, 0.52)  # Approximate CRO price
+                
+                # Varied savings percentages
+                savings = random.uniform(1.5, 4.5)
+                
+                # Varied statuses (mostly success, some pending)
+                statuses = ["success"] * 13 + ["pending"] * 2
+                
+                recent_executions.append({
+                    "id": f"exec_{i}_{random.randint(1000, 9999)}",
+                    "timestamp": now - time_offset,
+                    "token_in": token_in,
+                    "token_out": token_out,
+                    "amount_in": base_amount,
+                    "amount_out": int(base_amount * amount_out_multiplier),
+                    "savings_pct": round(savings, 2),
+                    "status": statuses[i] if i < len(statuses) else "success"
+                })
+            
+            # Sort by timestamp descending (most recent first)
+            recent_executions.sort(key=lambda x: x["timestamp"], reverse=True)
+            
             return {
-                "total_volume_usd": 1200000,
-                "total_executions": 342,
-                "avg_savings_pct": 2.4,
+                "total_volume_usd": 3456789,
+                "total_executions": 1247,
+                "avg_savings_pct": 2.87,
                 "agent_status": "active",
                 "success_rate": 98.5,
                 "avg_gas_efficiency": 0.95,
-                "recent_executions": [
-                    {
-                        "id": f"exec_{i}",
-                        "timestamp": int(datetime.now().timestamp()) - (i * 120),
-                        "token_in": "CRO",
-                        "token_out": "USDC.e",
-                        "amount_in": 100000 - (i * 1000),
-                        "amount_out": 50000 - (i * 500),
-                        "savings_pct": 2.1 + (i * 0.1),
-                        "status": "success"
-                    }
-                    for i in range(5)
-                ]
+                "recent_executions": recent_executions
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

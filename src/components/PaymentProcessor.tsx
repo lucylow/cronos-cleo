@@ -23,6 +23,17 @@ const PAYMENT_ABI = [
   "event PaymentReceived(uint256 indexed paymentId, address indexed payer, address token, uint256 amount, uint256 timestamp)",
 ] as const;
 
+// x402 Facilitator ABI for atomic batch payments
+const X402_FACILITATOR_ABI = [
+  "function executeConditionalBatch(tuple(address target, uint256 value, bytes data)[] operations, bytes condition, uint256 deadline) external payable",
+  "event BatchExecuted(bytes32 indexed batchId, uint256 operationsCount)",
+] as const;
+
+// MultiSend ABI for batch transfers
+const MULTI_SEND_ABI = [
+  "function batchTransfer(tuple(address token, address recipient, uint256 amount)[] transfers, uint256 deadline) external payable",
+] as const;
+
 // Standard ERC20 ABI
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
@@ -91,6 +102,21 @@ interface PaymentTemplate {
   tokenAddress?: string;
 }
 
+interface BatchPaymentItem {
+  id: string;
+  recipient: string;
+  amount: string;
+  tokenAddress?: string;
+  tokenType: "native" | "erc20";
+}
+
+// Get x402 facilitator address from environment
+const getX402FacilitatorAddress = (): string => {
+  const envAddr = import.meta.env.VITE_X402_FACILITATOR_ADDRESS;
+  if (envAddr) return envAddr;
+  return ""; // Will need to be set by user
+};
+
 export default function PaymentProcessor() {
   const { provider, signer, account, chainId, balance, connect } = useWallet();
   const [paymentContractAddress, setPaymentContractAddress] = useState(getPaymentContractAddress());
@@ -114,6 +140,11 @@ export default function PaymentProcessor() {
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [templates, setTemplates] = useState<PaymentTemplate[]>([]);
+  
+  // Batch payment features
+  const [x402FacilitatorAddress, setX402FacilitatorAddress] = useState(getX402FacilitatorAddress());
+  const [batchPayments, setBatchPayments] = useState<BatchPaymentItem[]>([]);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   useEffect(() => {
     // Auto-fetch token info when token address is entered
@@ -648,6 +679,164 @@ export default function PaymentProcessor() {
     toast.success("Copied to clipboard");
   };
 
+  const executeBatchPayment = async () => {
+    if (!signer || !x402FacilitatorAddress || batchPayments.length === 0) {
+      toast.error("Missing required information for batch payment");
+      return;
+    }
+
+    // Validate all payments
+    for (const payment of batchPayments) {
+      if (!payment.recipient || !payment.amount) {
+        toast.error(`Payment ${batchPayments.indexOf(payment) + 1} is incomplete`);
+        return;
+      }
+      if (payment.tokenType === "erc20" && !payment.tokenAddress) {
+        toast.error(`Payment ${batchPayments.indexOf(payment) + 1} missing token address`);
+        return;
+      }
+    }
+
+    setBatchLoading(true);
+    setStatus(null);
+    setTxHash(null);
+
+    try {
+      await ensureCronosNetwork();
+
+      const facilitator = new Contract(x402FacilitatorAddress, X402_FACILITATOR_ABI, signer);
+
+      // Build operations for x402 batch
+      const operations: Array<{ target: string; value: bigint; data: string }> = [];
+      let totalNativeValue = 0n;
+
+      for (const payment of batchPayments) {
+        const amountWei = payment.tokenType === "native"
+          ? ethers.parseEther(payment.amount)
+          : ethers.parseUnits(payment.amount, 18); // Assuming 18 decimals for ERC20
+
+        if (payment.tokenType === "native") {
+          // Native CRO transfer
+          totalNativeValue += amountWei;
+          operations.push({
+            target: payment.recipient,
+            value: amountWei,
+            data: "0x",
+          });
+        } else if (payment.tokenAddress) {
+          // ERC20 transfer
+          const tokenContract = new Contract(payment.tokenAddress, ERC20_ABI, signer);
+          
+          // Check and approve if needed
+          const allowance = await tokenContract.allowance(account, x402FacilitatorAddress);
+          if (allowance < amountWei) {
+            setStatus({ type: "info", message: `Approving token ${payment.tokenAddress}...` });
+            toast.info("Approving tokens...");
+            const approveTx = await tokenContract.approve(x402FacilitatorAddress, amountWei);
+            await approveTx.wait();
+          }
+
+          // Encode transfer function call
+          const transferData = tokenContract.interface.encodeFunctionData("transfer", [
+            payment.recipient,
+            amountWei,
+          ]);
+
+          operations.push({
+            target: payment.tokenAddress,
+            value: 0n,
+            data: transferData,
+          });
+        }
+      }
+
+      if (operations.length === 0) {
+        throw new Error("No valid operations to execute");
+      }
+
+      // Set deadline (30 minutes from now)
+      const deadline = Math.floor(Date.now() / 1000) + 1800;
+      const condition = "0x"; // No condition - all or nothing execution
+
+      setStatus({ type: "info", message: "Executing x402 batch..." });
+      toast.info(`Executing ${operations.length} payments atomically...`);
+
+      // Execute batch via x402 facilitator
+      const tx = await facilitator.executeConditionalBatch(
+        operations.map((op) => ({
+          target: op.target,
+          value: op.value,
+          data: op.data,
+        })),
+        condition,
+        deadline,
+        {
+          value: totalNativeValue,
+          gasLimit: 1_500_000n, // Higher gas limit for batch operations
+        }
+      );
+
+      setStatus({ type: "info", message: `Transaction sent: ${tx.hash}` });
+      setTxHash(tx.hash);
+      toast.info(`Batch transaction sent: ${tx.hash.slice(0, 10)}...`);
+
+      const receipt = await tx.wait();
+      console.log("Batch payment receipt:", receipt);
+
+      if (receipt.status === 1) {
+        setStatus({
+          type: "success",
+          message: `Batch payment successful! ${operations.length} payments executed atomically.`,
+        });
+        toast.success(`Batch payment successful! ${operations.length} payments executed.`);
+
+        // Add to history
+        batchPayments.forEach((payment, idx) => {
+          addToHistory({
+            id: Date.now() + idx,
+            txHash: tx.hash,
+            amount: payment.amount,
+            token: payment.tokenType === "native" ? "CRO" : payment.tokenAddress || "ERC20",
+            timestamp: Date.now(),
+            status: "success",
+          });
+        });
+
+        // Clear batch payments
+        setBatchPayments([]);
+
+        // Refresh balances
+        await fetchBalances();
+      } else {
+        throw new Error("Transaction failed");
+      }
+    } catch (error: any) {
+      console.error("Batch payment error:", error);
+      const errorMessage = error.message || "Batch payment failed";
+      setStatus({
+        type: "error",
+        message: errorMessage,
+      });
+      toast.error(errorMessage);
+
+      // Add failed batch to history
+      if (txHash) {
+        batchPayments.forEach((payment, idx) => {
+          addToHistory({
+            id: Date.now() + idx,
+            txHash,
+            amount: payment.amount,
+            token: payment.tokenType === "native" ? "CRO" : payment.tokenAddress || "ERC20",
+            timestamp: Date.now(),
+            status: "failed",
+          });
+        });
+      }
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       <Card>
@@ -773,9 +962,10 @@ export default function PaymentProcessor() {
               </div>
 
               <Tabs defaultValue="native" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="native">Native CRO</TabsTrigger>
                   <TabsTrigger value="erc20">ERC-20 Token</TabsTrigger>
+                  <TabsTrigger value="batch">x402 Batch</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="native" className="space-y-4 mt-4">
@@ -891,6 +1081,180 @@ export default function PaymentProcessor() {
                       </>
                     ) : (
                       `Pay with ${tokenSymbol || "ERC-20"}`
+                    )}
+                  </Button>
+                </TabsContent>
+
+                <TabsContent value="batch" className="space-y-4 mt-4">
+                  <Alert className="border-primary/50 bg-primary/5">
+                    <Layers className="h-4 w-4 text-primary" />
+                    <AlertDescription>
+                      Execute multiple payments atomically via x402 facilitator. All payments succeed or all revert.
+                    </AlertDescription>
+                  </Alert>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium">x402 Facilitator Address</label>
+                      {x402FacilitatorAddress && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => copyToClipboard(x402FacilitatorAddress)}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <Input
+                      value={x402FacilitatorAddress}
+                      onChange={(e) => setX402FacilitatorAddress(e.target.value)}
+                      placeholder="0x..."
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Set VITE_X402_FACILITATOR_ADDRESS in .env or enter manually
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">Batch Payments</label>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const newPayment: BatchPaymentItem = {
+                            id: Date.now().toString(),
+                            recipient: "",
+                            amount: "",
+                            tokenType: "native",
+                          };
+                          setBatchPayments([...batchPayments, newPayment]);
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Payment
+                      </Button>
+                    </div>
+
+                    {batchPayments.length === 0 ? (
+                      <div className="text-center py-8 border rounded-lg bg-muted/30">
+                        <p className="text-sm text-muted-foreground mb-2">No batch payments added</p>
+                        <p className="text-xs text-muted-foreground">Click "Add Payment" to create a batch</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {batchPayments.map((payment, idx) => (
+                          <Card key={payment.id} className="p-3">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Badge variant="outline">Payment {idx + 1}</Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setBatchPayments(batchPayments.filter((p) => p.id !== payment.id));
+                                  }}
+                                >
+                                  <X className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+                                  <select
+                                    className="w-full text-sm border rounded px-2 py-1"
+                                    value={payment.tokenType}
+                                    onChange={(e) => {
+                                      const updated = [...batchPayments];
+                                      updated[idx].tokenType = e.target.value as "native" | "erc20";
+                                      if (e.target.value === "native") {
+                                        updated[idx].tokenAddress = undefined;
+                                      }
+                                      setBatchPayments(updated);
+                                    }}
+                                  >
+                                    <option value="native">Native CRO</option>
+                                    <option value="erc20">ERC-20 Token</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Amount</label>
+                                  <Input
+                                    type="number"
+                                    step="0.0001"
+                                    value={payment.amount}
+                                    onChange={(e) => {
+                                      const updated = [...batchPayments];
+                                      updated[idx].amount = e.target.value;
+                                      setBatchPayments(updated);
+                                    }}
+                                    placeholder="0.1"
+                                    className="text-sm"
+                                  />
+                                </div>
+                              </div>
+
+                              {payment.tokenType === "erc20" && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Token Address</label>
+                                  <Input
+                                    value={payment.tokenAddress || ""}
+                                    onChange={(e) => {
+                                      const updated = [...batchPayments];
+                                      updated[idx].tokenAddress = e.target.value;
+                                      setBatchPayments(updated);
+                                    }}
+                                    placeholder="0x..."
+                                    className="font-mono text-xs"
+                                  />
+                                </div>
+                              )}
+
+                              <div>
+                                <label className="text-xs text-muted-foreground mb-1 block">Recipient</label>
+                                <Input
+                                  value={payment.recipient}
+                                  onChange={(e) => {
+                                    const updated = [...batchPayments];
+                                    updated[idx].recipient = e.target.value;
+                                    setBatchPayments(updated);
+                                  }}
+                                  placeholder="0x..."
+                                  className="font-mono text-xs"
+                                />
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    onClick={executeBatchPayment}
+                    disabled={
+                      batchLoading ||
+                      batchPayments.length === 0 ||
+                      !x402FacilitatorAddress ||
+                      !signer ||
+                      batchPayments.some((p) => !p.recipient || !p.amount || (p.tokenType === "erc20" && !p.tokenAddress))
+                    }
+                    className="w-full"
+                  >
+                    {batchLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Executing Batch...
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="mr-2 h-4 w-4" />
+                        Execute x402 Batch ({batchPayments.length} payments)
+                      </>
                     )}
                   </Button>
                 </TabsContent>

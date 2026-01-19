@@ -203,7 +203,7 @@ contract CrossDEXRouter is Ownable {
         // Execute via x402 facilitator (atomic batch)
         try facilitator.executeConditionalBatch(
             operations,
-            abi.encode(order.minTotalOut), // Condition: must receive at least minTotalOut
+            order.minTotalOut, // Condition: must receive at least minTotalOut
             order.deadline
         ) {
             // Check final balance

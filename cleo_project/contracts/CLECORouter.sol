@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@crypto.com/facilitator-client/contracts/interfaces/IFacilitatorClient.sol";
 
 /**
@@ -185,7 +185,7 @@ contract CLECORouter is ReentrancyGuard, Ownable, Pausable {
         // Atomic execution with global condition
         try facilitator.executeConditionalBatch(
             operations,
-            abi.encode(plan.minTotalOut), // Global condition: must receive at least minTotalOut
+            plan.minTotalOut, // Global condition: must receive at least minTotalOut
             plan.deadline
         ) {
             // Check final balance

@@ -122,6 +122,8 @@ contract CronosMultiSend is Ownable {
 
     /**
      * @notice Execute mixed batch (native + ERC20) via x402 facilitator for atomicity
+     * @dev Optimized: No SSTORE operations, uses events only
+     *      Atomic: All transfers succeed or entire tx reverts
      * @param batchId Unique batch identifier
      * @param transfers Array of transfers (can mix native and ERC20)
      * @param deadline Execution deadline
@@ -134,11 +136,13 @@ contract CronosMultiSend is Ownable {
         require(transfers.length > 0, "Empty batch");
         require(block.timestamp <= deadline, "Deadline passed");
 
-        // Build operations for x402 facilitator
+        // Build operations for x402 facilitator (efficient single loop)
         IFacilitatorClient.Operation[] memory operations = new IFacilitatorClient.Operation[](transfers.length);
+        uint256 gasStart = gasleft();
 
+        // Single loop to build operations (gas efficient)
         for (uint256 i = 0; i < transfers.length; i++) {
-            Transfer memory transfer = transfers[i];
+            Transfer calldata transfer = transfers[i]; // Use calldata instead of memory
 
             if (transfer.token == address(0)) {
                 // Native CRO transfer
@@ -148,28 +152,30 @@ contract CronosMultiSend is Ownable {
                     data: ""
                 });
             } else {
-                // ERC20 transfer
-                bytes memory data = abi.encodeWithSelector(
-                    IERC20.transfer.selector,
-                    transfer.recipient,
-                    transfer.amount
-                );
-                
+                // ERC20 transfer - encode selector inline (no function call overhead)
                 operations[i] = IFacilitatorClient.Operation({
                     target: transfer.token,
                     value: 0,
-                    data: data
+                    data: abi.encodeWithSelector(
+                        0xa9059cbb, // transfer(address,uint256) selector
+                        transfer.recipient,
+                        transfer.amount
+                    )
                 });
             }
         }
 
-        // Execute via x402 facilitator (atomic batch)
+        // Execute atomically via x402 facilitator
+        // All legs succeed or entire transaction reverts
+        // Convert bytes32 batchId to uint256 for condition (use first 256 bits)
+        uint256 conditionValue = uint256(batchId);
         try facilitator.executeConditionalBatch(
             operations,
-            abi.encode(batchId), // Condition data
+            conditionValue, // Condition: batchId as uint256
             deadline
-        ) {
-            // All transfers succeeded atomically
+        ) returns (bytes[] memory) {
+            // All transfers succeeded atomically - emit events (no SSTORE)
+            uint256 totalAmount = 0;
             for (uint256 i = 0; i < transfers.length; i++) {
                 emit TransferExecuted(
                     batchId,
@@ -177,10 +183,15 @@ contract CronosMultiSend is Ownable {
                     transfers[i].recipient,
                     transfers[i].amount
                 );
+                unchecked {
+                    totalAmount += transfers[i].amount;
+                }
             }
 
-            emit BatchExecuted(batchId, transfers.length, gasleft());
+            // Emit batch completion event with gas used (calculated, not stored)
+            emit BatchExecuted(batchId, transfers.length, gasStart - gasleft());
         } catch Error(string memory reason) {
+            // Atomic failure - entire batch reverted
             emit BatchFailed(batchId, reason);
             revert(reason);
         } catch {

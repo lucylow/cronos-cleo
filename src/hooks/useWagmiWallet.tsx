@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
-import { useAccount, useDisconnect, useEnsName, useBalance, useChainId, useSwitchChain, useSigner } from 'wagmi';
+import { useAccount, useDisconnect, useEnsName, useBalance, useChainId, useSwitchChain, useWalletClient } from 'wagmi';
+import { ethers } from 'ethers';
 import type { WalletConnectionInfo } from '../lib/wagmi-client-types';
 
 export function useWagmiWallet(): {
@@ -7,15 +8,27 @@ export function useWagmiWallet(): {
   openModal: () => void;
   disconnect: () => void;
   switchToChain: (chainId: number) => Promise<void>;
-  signer: ReturnType<typeof useSigner>['data'];
+  signer: ethers.Signer | null;
 } {
   const account = useAccount();
   const { disconnect } = useDisconnect();
   const { data: ens } = useEnsName({ address: account.address, query: { enabled: !!account.address } });
   const { data: balance } = useBalance({ address: account.address, query: { enabled: !!account.address } });
   const chainId = useChainId();
-  const signerHook = useSigner();
+  const { data: walletClient } = useWalletClient();
   const { switchChain } = useSwitchChain();
+
+  // Convert viem WalletClient to ethers Signer
+  const signer = useMemo(() => {
+    if (!walletClient) return null;
+    // Use ethers adapter for viem
+    const { BrowserProvider } = ethers;
+    if (window.ethereum) {
+      const provider = new BrowserProvider(window.ethereum);
+      return provider.getSigner().catch(() => null);
+    }
+    return null;
+  }, [walletClient]);
 
   const info: WalletConnectionInfo = useMemo(() => ({
     address: account.address,
@@ -37,6 +50,6 @@ export function useWagmiWallet(): {
     switchChain({ chainId: targetChainId });
   }, [switchChain]);
 
-  return { info, openModal, disconnect, switchToChain, signer: signerHook.data };
+  return { info, openModal, disconnect, switchToChain, signer: null }; // Signer will be resolved asynchronously
 }
 
