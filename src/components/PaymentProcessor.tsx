@@ -284,31 +284,6 @@ export default function PaymentProcessor() {
     }
   };
 
-  const fetchBalances = async () => {
-    if (!signer || !account || !provider) return;
-    try {
-      // Fetch native balance
-      const nativeBalance = await provider.getBalance(account);
-      setBalance(ethers.formatEther(nativeBalance));
-
-      // Fetch token balance if token address is set
-      if (tokenAddress && tokenAddress.startsWith("0x") && tokenAddress.length === 42) {
-        try {
-          const tokenContract = new Contract(tokenAddress, ERC20_ABI, signer);
-          const balance = await tokenContract.balanceOf(account);
-          setTokenBalance(ethers.formatUnits(balance, tokenDecimals));
-        } catch (error) {
-          console.error("Error fetching token balance:", error);
-          setTokenBalance(null);
-        }
-      } else {
-        setTokenBalance(null);
-      }
-    } catch (error) {
-      console.error("Error fetching balances:", error);
-    }
-  };
-
   const estimateGas = async () => {
     if (!signer || !account || !amount || !paymentContractAddress) return;
     try {

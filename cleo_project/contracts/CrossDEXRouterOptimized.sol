@@ -267,7 +267,9 @@ contract CrossDEXRouterOptimized is Ownable {
      */
     function registerDEX(string calldata dexId, address router) external onlyOwner {
         require(router != address(0), "Invalid router");
+        require(bytes(dexId).length > 0, "Invalid DEX ID");
         dexRouters[dexId] = router;
+        routerToDexId[router] = dexId; // Store reverse mapping
         emit DEXRegistered(dexId, router);
     }
 
@@ -275,7 +277,10 @@ contract CrossDEXRouterOptimized is Ownable {
      * @notice Unregister DEX router
      */
     function unregisterDEX(string calldata dexId) external onlyOwner {
+        address router = dexRouters[dexId];
+        require(router != address(0), "DEX not registered");
         delete dexRouters[dexId];
+        delete routerToDexId[router]; // Clean up reverse mapping
         emit DEXUnregistered(dexId);
     }
 
@@ -295,13 +300,16 @@ contract CrossDEXRouterOptimized is Ownable {
 
     // ========== HELPER FUNCTIONS ==========
 
+    // Reverse mapping: router address -> dexId (for efficient lookup)
+    mapping(address => string) private routerToDexId;
+
     /**
-     * @notice Get DEX ID from router address (simplified - in production use mapping)
+     * @notice Get DEX ID from router address
      */
-    function _getDexId(address router) internal pure returns (string memory) {
-        // In production, maintain reverse mapping
-        // For now, return placeholder
-        return "";
+    function _getDexId(address router) internal view returns (string memory) {
+        string memory dexId = routerToDexId[router];
+        require(bytes(dexId).length > 0, "Router not registered");
+        return dexId;
     }
 
     // ========== VIEW FUNCTIONS ==========

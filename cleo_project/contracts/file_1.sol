@@ -194,6 +194,14 @@ contract CrossDEXRouter is Ownable {
         RouteSplit[] storage routes = orderRoutes[orderId];
         require(routes.length > 0, "No routes");
 
+        // Approve routers to spend tokens (must be done before building operations)
+        for (uint i = 0; i < routes.length; i++) {
+            RouteSplit storage route = routes[i];
+            DEXInfo storage dex = dexRegistry[route.dexId];
+            require(dex.isActive, "DEX inactive");
+            IERC20(route.path[0]).approve(dex.router, route.amountIn);
+        }
+
         // Build operations for x402
         IFacilitatorClient.Operation[] memory operations = _buildOperations(orderId, routes);
 
@@ -234,6 +242,7 @@ contract CrossDEXRouter is Ownable {
 
     /**
      * @notice Build x402 operations from route splits
+     * @dev Assumes approvals have already been set
      */
     function _buildOperations(
         bytes32 orderId,
@@ -245,10 +254,6 @@ contract CrossDEXRouter is Ownable {
         for (uint i = 0; i < routes.length; i++) {
             RouteSplit storage route = routes[i];
             DEXInfo storage dex = dexRegistry[route.dexId];
-            require(dex.isActive, "DEX inactive");
-
-            // Approve router to spend tokens
-            IERC20(route.path[0]).approve(dex.router, route.amountIn);
 
             // Build swap call data (Uniswap V2 style: swapExactTokensForTokens)
             // Function signature: swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)

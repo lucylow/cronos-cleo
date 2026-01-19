@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number }>>([]);
+  const [usingMockData, setUsingMockData] = useState(false);
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
     try {
@@ -45,7 +46,20 @@ export default function Dashboard() {
       } else {
         setLoading(true);
       }
+      
+      // Try to fetch from API - will automatically fallback to mock data on failure
       const data = await api.getDashboardMetrics();
+      
+      // Check if this is mock data by checking if backend is actually available
+      // Do this check in parallel to avoid delaying the display
+      api.health({ timeout: 2000, retries: 0 })
+        .then(isAvailable => {
+          setUsingMockData(!isAvailable || !data || Object.keys(data).length === 0);
+        })
+        .catch(() => {
+          setUsingMockData(true);
+        });
+      
       setMetrics(data);
       setLastUpdate(new Date());
       
@@ -63,11 +77,14 @@ export default function Dashboard() {
         });
       }
     } catch (err) {
+      // Even if there's an error, mock data should have been returned by the API client
+      // But if it's still null, we have a problem
       const errorMessage = err instanceof ApiClientError 
         ? err.message 
         : 'Failed to load dashboard metrics';
       console.error('Failed to load dashboard metrics:', err);
       setError(errorMessage);
+      setUsingMockData(true);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -207,6 +224,28 @@ export default function Dashboard() {
             )}
           </div>
         </motion.div>
+
+      {/* Mock Data Indicator */}
+      {usingMockData && !loading && metrics && (
+        <Alert className="border-yellow-500/50 bg-yellow-500/10">
+          <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
+          <AlertDescription className="flex items-center justify-between">
+            <span className="text-sm">
+              <strong>Demo Mode:</strong> Backend not connected. Showing simulated data. 
+              Start the backend at <code className="text-xs bg-muted px-1 py-0.5 rounded mx-1">cleo_project/backend</code> for live blockchain data.
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchMetrics(true)}
+              className="ml-4"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry Connection
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {loading ? (
         <div className="space-y-6">
@@ -427,24 +466,34 @@ export default function Dashboard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ChartContainer config={chartConfig} className="h-[300px]">
-                    <AreaChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                    <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorExecutions" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--secondary))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--secondary))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" opacity={0.3} />
                       <XAxis 
                         dataKey="time" 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                        tickLine={{ stroke: 'hsl(var(--muted-foreground))' }}
                       />
                       <YAxis 
                         yAxisId="left"
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                        tickLine={{ stroke: 'hsl(var(--muted-foreground))' }}
                       />
                       <YAxis 
                         yAxisId="right" 
                         orientation="right"
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                        tickLine={{ stroke: 'hsl(var(--muted-foreground))' }}
                       />
                       <ChartTooltip content={<ChartTooltipContent />} />
                       <Area
@@ -452,18 +501,18 @@ export default function Dashboard() {
                         type="monotone"
                         dataKey="volume"
                         stroke="hsl(var(--primary))"
-                        fill="hsl(var(--primary))"
-                        fillOpacity={0.2}
+                        fill="url(#colorVolume)"
                         strokeWidth={2}
+                        name="Volume (USD)"
                       />
                       <Area
                         yAxisId="left"
                         type="monotone"
                         dataKey="executions"
                         stroke="hsl(var(--secondary))"
-                        fill="hsl(var(--secondary))"
-                        fillOpacity={0.2}
+                        fill="url(#colorExecutions)"
                         strokeWidth={2}
+                        name="Executions"
                       />
                       <Line
                         yAxisId="right"
@@ -472,6 +521,7 @@ export default function Dashboard() {
                         stroke="hsl(var(--accent))"
                         strokeWidth={2}
                         dot={false}
+                        name="Avg Savings %"
                       />
                     </AreaChart>
                   </ChartContainer>
@@ -592,5 +642,4 @@ export default function Dashboard() {
       </div>
     </TooltipProvider>
   );
-}
 }

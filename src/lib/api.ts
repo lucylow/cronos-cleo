@@ -377,7 +377,7 @@ async function fetchWithRetry<T>(
 // ==================== API Functions ====================
 
 /**
- * Fetch pools for a token pair
+ * Fetch pools for a token pair with automatic mock data fallback
  */
 export async function fetchPools(
   tokenIn: string,
@@ -397,13 +397,34 @@ export async function fetchPools(
         ...options,
         cache: options?.cache ?? true, // Cache pools by default
         cacheTTL: options?.cacheTTL ?? 30000, // 30 seconds
+        retries: options?.retries ?? 1, // Fewer retries for faster fallback
+        timeout: options?.timeout ?? 5000, // Shorter timeout for faster fallback
       }
     );
     return data.pools || [];
   } catch (error: any) {
-    console.error('Error fetching pools:', error);
-    // Return empty array on error - frontend can use mock data as fallback
-    return [];
+    console.warn('Error fetching pools, using mock data:', error.message);
+    // Import mock data dynamically to avoid circular dependencies
+    const { getMockPoolsSnapshot, getToken } = await import('./mock-data');
+    const pools = getMockPoolsSnapshot();
+    // Filter pools by token pair and convert to PoolInfo format
+    const tokenA = getToken(tokenIn);
+    const tokenB = getToken(tokenOut);
+    if (!tokenA || !tokenB) return [];
+    
+    return pools
+      .filter(p => 
+        (p.tokenA === tokenA.address && p.tokenB === tokenB.address) ||
+        (p.tokenA === tokenB.address && p.tokenB === tokenA.address)
+      )
+      .map(p => ({
+        dex: p.dex,
+        pair: p.pair,
+        reserveIn: p.reserveA,
+        reserveOut: p.reserveB,
+        feeBps: p.feeBps,
+        address: p.id,
+      }));
   }
 }
 
@@ -439,7 +460,7 @@ export async function optimizeRoutes(
   } catch (error: any) {
     console.warn('Error optimizing routes, using mock data:', error.message);
     // Import mock data dynamically to avoid circular dependencies
-    const { mockAgentDecision, getMockPoolsSnapshot, getToken } = await import('./mock-data');
+    const { mockAgentDecision, getMockPoolsSnapshot } = await import('./mock-data');
     const pools = getMockPoolsSnapshot();
     
     // Convert mock decision to OptimizeResponse format
@@ -447,13 +468,15 @@ export async function optimizeRoutes(
       maxPoolImpactPct: (request.max_slippage || 0.005) * 100,
     });
     
-    const tokenA = getToken(request.token_in);
-    const tokenB = getToken(request.token_out);
+    // Calculate total out and slippage
+    const totalOut = decision.routes.reduce((sum, r) => sum + (r.estimatedOut || 0), 0);
+    const totalIn = decision.routes.reduce((sum, r) => sum + (r.amountIn || 0), 0);
+    const slippagePct = totalIn > 0 ? Math.abs((totalOut / totalIn) - 1) : 0;
     
     return {
       optimized_split: {
-        predicted_slippage: Math.abs(decision.meta?.avgSlippagePct || 0) / 100,
-        total_out: decision.routes.reduce((sum, r) => sum + (r.estimatedOut || 0), 0),
+        predicted_slippage: slippagePct,
+        total_out: totalOut,
       },
       routes: decision.routes.map((r, idx) => ({
         id: r.dex + '_' + idx,
@@ -465,8 +488,10 @@ export async function optimizeRoutes(
       })),
       predicted_improvement: Math.random() * 0.03 + 0.01, // 1-4% improvement
       risk_metrics: {
-        diversification_score: decision.routes.length * 2.5,
-        max_single_route_share: Math.max(...decision.routes.map(r => r.amountIn / request.amount_in)),
+        diversification_score: Math.min(10, decision.routes.length * 2.5),
+        max_single_route_share: decision.routes.length > 0 
+          ? Math.max(...decision.routes.map(r => r.amountIn / Math.max(totalIn, 1)))
+          : 1,
         route_count: decision.routes.length,
       },
     };
@@ -474,31 +499,58 @@ export async function optimizeRoutes(
 }
 
 /**
- * Simulate execution of routes
+ * Simulate execution of routes with automatic mock data fallback
  */
 export async function simulateExecution(
   routes: SplitRoute[],
   options?: RequestOptions
 ): Promise<SimulationResult> {
-  return fetchWithRetry<SimulationResult>(
-    `${API_BASE_URL}/api/simulate`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+  try {
+    return await fetchWithRetry<SimulationResult>(
+      `${API_BASE_URL}/api/simulate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(routes),
       },
-      body: JSON.stringify(routes),
-    },
-    {
-      ...options,
-      timeout: options?.timeout ?? 45000, // 45 seconds for simulation
-      cache: false,
-    }
-  );
+      {
+        ...options,
+        timeout: options?.timeout ?? 45000, // 45 seconds for simulation
+        cache: false,
+        retries: options?.retries ?? 1, // Fewer retries for faster fallback
+      }
+    );
+  } catch (error: any) {
+    console.warn('Error simulating execution, using mock data:', error.message);
+    // Fallback to local calculation
+    await new Promise((r) => setTimeout(r, 200)); // Simulate network delay
+    const totalIn = routes.reduce((s, r) => s + r.amountIn, 0);
+    const totalOut = routes.reduce((s, r) => s + (r.estimatedOut || 0), 0);
+    const slippagePct = totalIn > 0 
+      ? Math.abs(((totalOut / totalIn) - 1) * 100) 
+      : 0;
+    const gasEstimate = 120_000 + routes.length * 12_000;
+    
+    return {
+      totalIn,
+      totalOut,
+      slippagePct: Math.abs(slippagePct),
+      gasEstimate,
+      routeBreakdown: routes.map(r => ({
+        id: r.id,
+        dex: r.dex,
+        amountIn: r.amountIn,
+        estimatedOut: r.estimatedOut || 0,
+        path: r.path,
+      })),
+    };
+  }
 }
 
 /**
- * Get liquidity data for a trading pair
+ * Get liquidity data for a trading pair with automatic mock data fallback
  */
 export async function getLiquidityData(
   pair: string,
@@ -517,11 +569,33 @@ export async function getLiquidityData(
         ...options,
         cache: options?.cache ?? true,
         cacheTTL: options?.cacheTTL ?? 10000, // 10 seconds
+        retries: options?.retries ?? 1, // Fewer retries for faster fallback
+        timeout: options?.timeout ?? 5000, // Shorter timeout for faster fallback
       }
     );
   } catch (error: any) {
-    console.error('Error fetching liquidity data:', error);
-    return null;
+    console.warn('Error fetching liquidity data, using mock data:', error.message);
+    // Import mock data dynamically to avoid circular dependencies
+    const { getMockPoolsSnapshot, getLatestPrice } = await import('./mock-data');
+    const pools = getMockPoolsSnapshot();
+    const latestPrice = getLatestPrice();
+    
+    // Filter pools by pair and format response
+    const filteredPools = pools.filter(p => p.pair === pair);
+    
+    return {
+      pair,
+      price: latestPrice.priceCRO_USDC,
+      vol1h: latestPrice.vol24h,
+      pools: filteredPools.map(p => ({
+        id: p.id,
+        dex: p.dex,
+        reserveA: p.reserveA,
+        reserveB: p.reserveB,
+        feeBps: p.feeBps,
+        tvl: p.tvl,
+      })),
+    };
   }
 }
 
@@ -638,7 +712,7 @@ export async function getAgentStatus(options?: RequestOptions): Promise<any> {
 }
 
 /**
- * Get recent executions
+ * Get recent executions with automatic mock data fallback
  */
 export async function getRecentExecutions(
   limit: number = 10,
@@ -657,12 +731,24 @@ export async function getRecentExecutions(
         ...options,
         cache: options?.cache ?? true,
         cacheTTL: options?.cacheTTL ?? 15000, // 15 seconds
+        retries: options?.retries ?? 1, // Fewer retries for faster fallback
+        timeout: options?.timeout ?? 5000, // Shorter timeout for faster fallback
       }
     );
     return data;
   } catch (error: any) {
-    console.error('Error fetching recent executions:', error);
-    return null;
+    console.warn('Error fetching recent executions, using mock data:', error.message);
+    // Import mock data dynamically to avoid circular dependencies
+    const { generateMockDashboardMetrics } = await import('./mock-data');
+    const metrics = generateMockDashboardMetrics();
+    return {
+      executions: (metrics.recent_executions || []).slice(0, limit).map(exec => ({
+        ...exec,
+        tx_hash: `0x${Math.random().toString(16).substr(2, 64)}`,
+        gas_used: Math.floor(Math.random() * 200000 + 80000),
+        block_number: Math.floor(Math.random() * 1000000 + 8000000),
+      })),
+    };
   }
 }
 

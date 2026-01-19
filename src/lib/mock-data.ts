@@ -198,11 +198,13 @@ function randomWallet() { return '0x' + crypto.randomBytes(20).toString('hex'); 
 
 export function generateMempoolEvents(count = 50) {
   const events: MempoolEvent[] = [];
+  const pairs = ['CRO-USDC.e', 'CRO-USDT', 'CRO-DAI', 'CRO-WETH', 'USDC.e-USDT', 'USDC.e-WETH', 'WETH-WBTC', 'CRO-LINK', 'CRO-ATOM'];
   for (let i = 0; i < count; i++) {
     const type = rng() < 0.05 ? 'sandwich' : (rng() < 0.02 ? 'cancel' : 'tx');
     const ev: MempoolEvent = { id: uid('mp'), type, from: randomWallet(), gasPriceGwei: Number(rand(1, 300).toFixed(2)), timestamp: nowSeconds() - Math.floor(rand(0, 60 * 60)) };
-    if (type === 'tx') { ev.amountIn = Math.floor(rand(1, 250000)); ev.pair = sample(['CRO-USDC.e', 'CRO-USDT', 'CRO-DAI']); }
-    if (type === 'sandwich') { ev.amountIn = Math.floor(rand(1000, 200000)); ev.pair = 'CRO-USDC.e'; ev.note = 'detected sandwich candidate'; }
+    if (type === 'tx') { ev.amountIn = Math.floor(rand(1, 250000)); ev.pair = sample(pairs); }
+    if (type === 'sandwich') { ev.amountIn = Math.floor(rand(1000, 200000)); ev.pair = sample(['CRO-USDC.e', 'CRO-USDT', 'CRO-WETH']); ev.note = 'detected sandwich candidate'; }
+    if (type === 'priority') { ev.amountIn = Math.floor(rand(50000, 500000)); ev.pair = sample(pairs); ev.note = 'high priority transaction'; }
     events.push(ev);
   }
   return events;
@@ -265,12 +267,30 @@ export type LargeTradeScenario = {
 export function generateLargeTradeScenarios() {
   const basePools = getMockPoolsSnapshot();
   const scenarios: LargeTradeScenario[] = [];
-  const sizes = [50_000, 100_000, 250_000, 1_000_000];
+  const sizes = [50_000, 100_000, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000];
+  const tokenPairs = [
+    { in: 'CRO', out: 'USDC.e' },
+    { in: 'CRO', out: 'USDT' },
+    { in: 'CRO', out: 'WETH' },
+    { in: 'USDC.e', out: 'WETH' },
+    { in: 'WETH', out: 'WBTC' }
+  ];
   for (const size of sizes) {
-    const decision = mockAgentDecision(size, basePools, { maxPoolImpactPct: 8 });
-    scenarios.push({ name: `Institutional-${size}`, amountIn: size, description: `Swap ${size} CRO -> USDC.e`, expectedRisks: ['slippage', 'MEV', 'pool depletion'], suggestedRoutes: decision.routes });
+    for (const pair of tokenPairs) {
+      const relevantPools = basePools.filter(p => p.pair.includes(pair.in) && p.pair.includes(pair.out));
+      if (relevantPools.length > 0) {
+        const decision = mockAgentDecision(size, relevantPools, { maxPoolImpactPct: 8 });
+        scenarios.push({ 
+          name: `Institutional-${pair.in}-${pair.out}-${size}`, 
+          amountIn: size, 
+          description: `Swap ${size} ${pair.in} -> ${pair.out}`, 
+          expectedRisks: ['slippage', 'MEV', 'pool depletion', 'price impact'], 
+          suggestedRoutes: decision.routes 
+        });
+      }
+    }
   }
-  return scenarios;
+  return scenarios.slice(0, 20); // Limit to 20 scenarios
 }
 
 // --------------------------- Mock Transaction Receipts & Failures ---------------------------

@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from 'react';
-import { useAccount, useDisconnect, useEnsName, useBalance, useChainId, useSwitchChain, useWalletClient } from 'wagmi';
+import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useAccount, useDisconnect, useEnsName, useBalance, useChainId, useSwitchChain } from 'wagmi';
 import { ethers } from 'ethers';
 import type { WalletConnectionInfo } from '../lib/wagmi-client-types';
 
@@ -15,20 +15,29 @@ export function useWagmiWallet(): {
   const { data: ens } = useEnsName({ address: account.address, query: { enabled: !!account.address } });
   const { data: balance } = useBalance({ address: account.address, query: { enabled: !!account.address } });
   const chainId = useChainId();
-  const { data: walletClient } = useWalletClient();
   const { switchChain } = useSwitchChain();
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
 
-  // Convert viem WalletClient to ethers Signer
-  const signer = useMemo(() => {
-    if (!walletClient) return null;
-    // Use ethers adapter for viem
-    const { BrowserProvider } = ethers;
-    if (window.ethereum) {
-      const provider = new BrowserProvider(window.ethereum);
-      return provider.getSigner().catch(() => null);
-    }
-    return null;
-  }, [walletClient]);
+  // Get ethers signer from window.ethereum when account is connected
+  useEffect(() => {
+    const getSigner = async () => {
+      if (!account.isConnected || !window.ethereum) {
+        setSigner(null);
+        return;
+      }
+      
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const s = await provider.getSigner();
+        setSigner(s);
+      } catch (error) {
+        console.error('Failed to get signer:', error);
+        setSigner(null);
+      }
+    };
+
+    getSigner();
+  }, [account.isConnected, account.address]);
 
   const info: WalletConnectionInfo = useMemo(() => ({
     address: account.address,
@@ -41,8 +50,9 @@ export function useWagmiWallet(): {
 
   const openModal = useCallback(() => {
     // In a real implementation with Web3Modal, you'd open the modal here
-    // For now, this is a placeholder - you may want to integrate with your existing WalletProvider
-    console.log('Open wallet modal');
+    // For now, this triggers the wallet connection via wagmi injected connector
+    // Users can connect via the existing WalletProvider or wagmi's injected connector
+    console.log('Open wallet modal - use existing wallet connection flow');
   }, []);
 
   const switchToChain = useCallback(async (targetChainId: number) => {
@@ -50,6 +60,5 @@ export function useWagmiWallet(): {
     switchChain({ chainId: targetChainId });
   }, [switchChain]);
 
-  return { info, openModal, disconnect, switchToChain, signer: null }; // Signer will be resolved asynchronously
+  return { info, openModal, disconnect, switchToChain, signer };
 }
-

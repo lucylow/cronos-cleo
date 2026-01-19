@@ -31,13 +31,6 @@ contract OptimizedAtomicRouter is Ownable, EIP712 {
     IFacilitatorClient public immutable facilitator;
 
     // ========== CONSTANTS ==========
-    bytes32 private constant EXECUTE_BATCH_TYPEHASH = keccak256(
-        "ExecuteBatch(address user,Leg[] legs,uint256 deadline,uint256 nonce)"
-        "Leg(address target,uint256 value,bytes data)"
-    );
-    bytes32 private constant LEG_TYPEHASH = keccak256(
-        "Leg(address target,uint256 value,bytes data)"
-    );
     uint256 private constant MAX_LEGS = 50; // Prevent gas limit issues
 
     // ========== STATE VARIABLES (MINIMAL) ==========
@@ -333,11 +326,11 @@ library BatchExecutorHelper {
      * @notice Validate leg array (off-chain helper)
      */
     function validateLegs(
-        OptimizedAtomicRouter.Leg[] memory legs
+        address[] memory targets
     ) internal pure returns (bool) {
-        if (legs.length == 0 || legs.length > 50) return false;
-        for (uint256 i = 0; i < legs.length; i++) {
-            if (legs[i].target == address(0)) return false;
+        if (targets.length == 0 || targets.length > 50) return false;
+        for (uint256 i = 0; i < targets.length; i++) {
+            if (targets[i] == address(0)) return false;
         }
         return true;
     }

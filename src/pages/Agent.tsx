@@ -84,14 +84,26 @@ export default function Agent() {
   const fetchStatus = async () => {
     try {
       setLoading(true);
+      // Try to fetch from API - will automatically fallback to mock data on failure
       const data = await api.getAgentStatus();
+      
+      // Check if this is mock data by checking if backend is actually available
+      // Do this check in parallel to avoid delaying the display
+      api.health({ timeout: 2000, retries: 0 })
+        .then(isAvailable => {
+          setUsingMockData(!isAvailable || !data || Object.keys(data).length === 0);
+        })
+        .catch(() => {
+          setUsingMockData(true);
+        });
+      
       setAgentStatus(data);
-      setUsingMockData(false);
     } catch (err) {
+      // Even if there's an error, mock data should have been returned by the API client
       console.error('Failed to load agent status:', err);
-      // Use mock data as fallback
-      setAgentStatus(MOCK_AGENT_STATUS);
       setUsingMockData(true);
+      // API client should have returned mock data automatically, but ensure we have something
+      setAgentStatus((prev) => prev || MOCK_AGENT_STATUS);
     } finally {
       setLoading(false);
     }
