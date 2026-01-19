@@ -2509,6 +2509,58 @@ class PaymentContractInfoResponse(BaseModel):
     payment_count: Optional[int] = None
     owner: Optional[str] = None
 
+class PaymentBatchVerifyRequest(BaseModel):
+    requests: List[PaymentVerifyRequest]
+
+class PaymentBatchVerifyResponse(BaseModel):
+    ok: bool
+    results: Optional[List[Dict[str, Any]]] = None
+    error: Optional[str] = None
+
+@app.post("/api/payments/verify-batch", response_model=PaymentBatchVerifyResponse)
+async def verify_payments_batch(request: PaymentBatchVerifyRequest):
+    """
+    Verify multiple payment transactions in batch
+    
+    - Supports both native CRO and ERC-20 token payments
+    - Uses caching to improve performance
+    - Returns results for each payment request
+    """
+    try:
+        from verify_payment import verify_payments_batch as batch_verify
+        
+        # Convert Pydantic models to dicts
+        requests_list = [
+            {
+                'tx_hash': r.tx_hash,
+                'token_address': r.token_address,
+                'expected_recipient': r.expected_recipient,
+                'min_amount_wei': r.min_amount_wei,
+            }
+            for r in request.requests
+        ]
+        
+        results = await batch_verify(requests_list)
+        
+        return PaymentBatchVerifyResponse(
+            ok=True,
+            results=results
+        )
+    except Exception as e:
+        logger.error(f"Error in batch verification: {e}", exc_info=True)
+        return PaymentBatchVerifyResponse(ok=False, error=str(e))
+
+@app.post("/api/payments/clear-cache")
+async def clear_payment_cache():
+    """Clear the payment verification cache"""
+    try:
+        from verify_payment import clear_cache
+        clear_cache()
+        return {"ok": True, "message": "Cache cleared successfully"}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
+
 @app.get("/api/payments/contract-info", response_model=PaymentContractInfoResponse)
 async def get_payment_contract_info():
     """Get payment processor contract information"""

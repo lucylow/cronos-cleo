@@ -1,4 +1,6 @@
 import PaymentProcessor from "@/components/PaymentProcessor";
+import AutomatedPaymentRules from "@/components/AutomatedPaymentRules";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Payments = () => {
   return (
@@ -6,10 +8,21 @@ const Payments = () => {
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Payment Processor</h1>
         <p className="text-muted-foreground">
-          Accept payments in native CRO or ERC-20 tokens on Cronos
+          Accept payments in native CRO or ERC-20 tokens on Cronos with agentic automation
         </p>
       </div>
-      <PaymentProcessor />
+      <Tabs defaultValue="processor" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 max-w-md mb-6">
+          <TabsTrigger value="processor">Payment Processor</TabsTrigger>
+          <TabsTrigger value="rules">Automated Rules</TabsTrigger>
+        </TabsList>
+        <TabsContent value="processor">
+          <PaymentProcessor />
+        </TabsContent>
+        <TabsContent value="rules">
+          <AutomatedPaymentRules />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
