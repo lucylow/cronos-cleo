@@ -1,15 +1,21 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download } from 'lucide-react';
+import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download, Network, Coins } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { api, ApiClientError } from '@/lib/api';
+import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { getDashboardMetricsWebSocket, WebSocketState } from '@/lib/websocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { CronosNetworkStatus } from '@/components/CronosNetworkStatus';
+import { useCronosBlockchain } from '@/hooks/useCronosBlockchain';
+import { useBalance, useAccount } from 'wagmi';
+import { formatUnits } from 'viem';
 
 interface DashboardMetrics {
   total_volume_usd?: number;
@@ -37,6 +43,19 @@ export default function Dashboard() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number }>>([]);
   const [usingMockData, setUsingMockData] = useState(false);
+
+  // Cronos blockchain data
+  const { data: blockchainData, isConnected: isBlockchainConnected } = useCronosBlockchain({
+    enabled: true,
+    updateInterval: 5000,
+    trackBlockTime: true,
+  });
+
+  // User CRO balance
+  const { address } = useAccount();
+  const { data: balanceData } = useBalance({
+    address,
+  });
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
     try {
@@ -303,8 +322,97 @@ export default function Dashboard() {
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {/* Cronos Network Status Card */}
+            {isBlockchainConnected && blockchainData && (
+              <motion.div
+                custom={0}
+                initial="hidden"
+                animate="visible"
+                variants={cardVariants}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 hover:border-primary/30 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Cronos Network
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                          <Network className="h-4 w-4 text-primary" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-2xl font-bold mb-1">
+                          Block #{blockchainData.currentBlock?.toLocaleString() || '0'}
+                        </div>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          {blockchainData.blockTime ? (
+                            <>
+                              <Clock className="h-3 w-3" />
+                              {blockchainData.blockTime.toFixed(1)}s avg
+                            </>
+                          ) : (
+                            <>{blockchainData.networkName}</>
+                          )}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Cronos Blockchain</p>
+                    <p className="text-xs mb-1">Network: {blockchainData.networkName}</p>
+                    <p className="text-xs mb-1">Current Block: {blockchainData.currentBlock?.toLocaleString()}</p>
+                    {blockchainData.gasPriceGwei && (
+                      <p className="text-xs">Gas Price: {parseFloat(blockchainData.gasPriceGwei).toFixed(2)} Gwei</p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+            )}
+
+            {/* CRO Balance Card */}
+            {address && balanceData && isBlockchainConnected && (
+              <motion.div
+                custom={isBlockchainConnected && blockchainData ? 1 : 0}
+                initial="hidden"
+                animate="visible"
+                variants={cardVariants}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 hover:border-accent/30 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Your Balance
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                          <Coins className="h-4 w-4 text-accent" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-2xl font-bold mb-1">
+                          {parseFloat(formatUnits(balanceData.value, balanceData.decimals)).toFixed(4)} {balanceData.symbol}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {blockchainData?.networkName || 'Cronos'}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Wallet Balance</p>
+                    <p className="text-xs">Your {balanceData.symbol} balance on Cronos network</p>
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+            )}
+
             <motion.div
-              custom={0}
+              custom={isBlockchainConnected && blockchainData ? (address && balanceData ? 2 : 1) : 0}
               initial="hidden"
               animate="visible"
               variants={cardVariants}
@@ -527,6 +635,17 @@ export default function Dashboard() {
                   </ChartContainer>
                 </CardContent>
               </Card>
+            </motion.div>
+          )}
+
+          {/* Cronos Network Status Section */}
+          {isBlockchainConnected && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3, duration: 0.4 }}
+            >
+              <CronosNetworkStatus />
             </motion.div>
           )}
 

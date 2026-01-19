@@ -255,6 +255,64 @@ function setCached<T>(key: string, data: T, ttl: number): void {
   });
 }
 
+// ==================== Request Interceptors ====================
+
+type RequestInterceptor = (url: string, options: RequestInit) => void | Promise<void>;
+type ResponseInterceptor = (response: Response) => void | Promise<void>;
+type ErrorInterceptor = (error: Error, url: string, options: RequestInit) => void | Promise<void>;
+
+const requestInterceptors: RequestInterceptor[] = [];
+const responseInterceptors: ResponseInterceptor[] = [];
+const errorInterceptors: ErrorInterceptor[] = [];
+
+export function addRequestInterceptor(interceptor: RequestInterceptor): void {
+  requestInterceptors.push(interceptor);
+}
+
+export function addResponseInterceptor(interceptor: ResponseInterceptor): void {
+  responseInterceptors.push(interceptor);
+}
+
+export function addErrorInterceptor(interceptor: ErrorInterceptor): void {
+  errorInterceptors.push(interceptor);
+}
+
+export function removeRequestInterceptor(interceptor: RequestInterceptor): void {
+  const index = requestInterceptors.indexOf(interceptor);
+  if (index > -1) {
+    requestInterceptors.splice(index, 1);
+  }
+}
+
+export function removeResponseInterceptor(interceptor: ResponseInterceptor): void {
+  const index = responseInterceptors.indexOf(interceptor);
+  if (index > -1) {
+    responseInterceptors.splice(index, 1);
+  }
+}
+
+export function removeErrorInterceptor(interceptor: ErrorInterceptor): void {
+  const index = errorInterceptors.indexOf(interceptor);
+  if (index > -1) {
+    errorInterceptors.splice(index, 1);
+  }
+}
+
+// Add default logging interceptor in development
+if (typeof window !== 'undefined' && (import.meta as any).env?.DEV) {
+  addRequestInterceptor((url, options) => {
+    console.log('[API Request]', options.method || 'GET', url, options.body ? JSON.parse(options.body as string) : {});
+  });
+
+  addResponseInterceptor((response) => {
+    console.log('[API Response]', response.status, response.statusText, response.url);
+  });
+
+  addErrorInterceptor((error, url, options) => {
+    console.error('[API Error]', error.message, url, options.method || 'GET');
+  });
+}
+
 // ==================== Request Utilities ====================
 
 async function sleep(ms: number): Promise<void> {
@@ -315,20 +373,49 @@ async function fetchWithRetry<T>(
     }
   }
 
+  // Run request interceptors
+  for (const interceptor of requestInterceptors) {
+    try {
+      await interceptor(url, options);
+    } catch (error) {
+      console.warn('Request interceptor error:', error);
+    }
+  }
+
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetchWithTimeout(url, options, timeout, signal);
 
+      // Run response interceptors
+      for (const interceptor of responseInterceptors) {
+        try {
+          await interceptor(response);
+        } catch (error) {
+          console.warn('Response interceptor error:', error);
+        }
+      }
+
       if (!response.ok) {
         const error = await parseErrorResponse(response);
-        throw new ApiClientError(
+        const apiError = new ApiClientError(
           error.message,
           error.code,
           error.status,
           error.details
         );
+
+        // Run error interceptors
+        for (const interceptor of errorInterceptors) {
+          try {
+            await interceptor(apiError, url, options);
+          } catch (error) {
+            console.warn('Error interceptor error:', error);
+          }
+        }
+
+        throw apiError;
       }
 
       const data = await response.json();
@@ -347,12 +434,29 @@ async function fetchWithRetry<T>(
         error instanceof ApiClientError &&
         (error.status === 400 || error.status === 401 || error.status === 403 || error.status === 404)
       ) {
+        // Run error interceptors for non-retryable errors
+        for (const interceptor of errorInterceptors) {
+          try {
+            await interceptor(error, url, options);
+          } catch (err) {
+            console.warn('Error interceptor error:', err);
+          }
+        }
         throw error;
       }
 
       // Don't retry on abort
       if (error.name === 'AbortError' || signal?.aborted) {
-        throw new ApiClientError('Request cancelled', 'CANCELLED', 0);
+        const cancelError = new ApiClientError('Request cancelled', 'CANCELLED', 0);
+        // Run error interceptors for cancelled requests
+        for (const interceptor of errorInterceptors) {
+          try {
+            await interceptor(cancelError, url, options);
+          } catch (err) {
+            console.warn('Error interceptor error:', err);
+          }
+        }
+        throw cancelError;
       }
 
       // If not the last attempt, wait and retry
@@ -365,13 +469,23 @@ async function fetchWithRetry<T>(
   }
 
   // If all retries failed, throw the last error
-  if (lastError instanceof ApiClientError) {
-    throw lastError;
+  const finalError = lastError instanceof ApiClientError
+    ? lastError
+    : new ApiClientError(
+        lastError?.message || 'Request failed after retries',
+        'NETWORK_ERROR'
+      );
+
+  // Run error interceptors for final failure
+  for (const interceptor of errorInterceptors) {
+    try {
+      await interceptor(finalError, url, options);
+    } catch (error) {
+      console.warn('Error interceptor error:', error);
+    }
   }
-  throw new ApiClientError(
-    lastError?.message || 'Request failed after retries',
-    'NETWORK_ERROR'
-  );
+
+  throw finalError;
 }
 
 // ==================== API Functions ====================
