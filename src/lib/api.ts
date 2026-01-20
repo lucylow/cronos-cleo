@@ -826,6 +826,40 @@ export async function getAgentStatus(options?: RequestOptions): Promise<any> {
 }
 
 /**
+ * Get financial metrics with automatic mock data fallback
+ */
+export async function getFinancialMetrics(
+  options?: RequestOptions
+): Promise<any> {
+  try {
+    return await fetchWithRetry(
+      `${API_BASE_URL}/api/metrics/financial`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+      {
+        ...options,
+        cache: options?.cache ?? true,
+        cacheTTL: options?.cacheTTL ?? 30000, // 30 seconds
+        retries: options?.retries ?? 1,
+        timeout: options?.timeout ?? 5000,
+      }
+    );
+  } catch (error: any) {
+    console.warn('Error fetching financial metrics, using fallback:', error.message);
+    // Return minimal structure if backend unavailable
+    return {
+      financial_summary: {},
+      recent_executions: [],
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+
+/**
  * Get recent executions with automatic mock data fallback
  */
 export async function getRecentExecutions(
@@ -1448,6 +1482,7 @@ export const api = {
   getLiquidity: getLiquidityData,
   health: checkHealth,
   getDashboardMetrics,
+  getFinancialMetrics,
   getAgentStatus,
   getRecentExecutions,
   // Gas API

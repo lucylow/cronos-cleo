@@ -14,6 +14,10 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine } from 'recharts';
 import { CronosNetworkStatus } from '@/components/CronosNetworkStatus';
 import { useCronosBlockchain } from '@/hooks/useCronosBlockchain';
+import { CronosDEXAnalytics } from '@/components/CronosDEXAnalytics';
+import { CronosEcosystemExplorer } from '@/components/CronosEcosystemExplorer';
+import { CronosValidatorStats } from '@/components/CronosValidatorStats';
+import { CronosDEXPoolBrowser } from '@/components/CronosDEXPoolBrowser';
 import { useBalance, useAccount, useChainId, useReadContract } from 'wagmi';
 import { formatUnits, parseUnits } from 'viem';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -116,6 +120,8 @@ export default function Dashboard() {
   const [usingMockData, setUsingMockData] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [agentStatus, setAgentStatus] = useState<any>(null);
+  const [backendConnected, setBackendConnected] = useState(false);
 
   // Cronos blockchain data
   const { data: blockchainData, isConnected: isBlockchainConnected } = useCronosBlockchain({
@@ -244,11 +250,25 @@ export default function Dashboard() {
       // Do this check in parallel to avoid delaying the display
       api.health({ timeout: 2000, retries: 0 })
         .then(isAvailable => {
+          setBackendConnected(isAvailable);
           setUsingMockData(!isAvailable || !data || Object.keys(data).length === 0);
         })
         .catch((healthErr) => {
           console.warn('Health check failed:', healthErr);
+          setBackendConnected(false);
           setUsingMockData(true);
+        });
+      
+      // Fetch agent status from backend in parallel
+      api.getAgentStatus({ timeout: 3000, retries: 0 })
+        .then(status => {
+          if (status && typeof status === 'object') {
+            setAgentStatus(status);
+          }
+        })
+        .catch((agentErr) => {
+          console.warn('Agent status fetch failed:', agentErr);
+          // Keep previous agent status or set to null
         });
       
       setMetrics(data);
@@ -474,13 +494,34 @@ export default function Dashboard() {
   // Keyboard shortcut for refresh (R key)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-      if ((e.key === 'r' || e.key === 'R') && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        fetchMetrics(true);
+      try {
+        if ((e.key === 'r' || e.key === 'R') && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          try {
+            fetchMetrics(true);
+          } catch (err) {
+            console.error('Error refreshing metrics from keyboard shortcut:', err);
+            setError(err instanceof Error ? err.message : 'Failed to refresh metrics');
+          }
+        }
+      } catch (err) {
+        console.error('Error handling keyboard shortcut:', err);
       }
     };
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
+    
+    try {
+      window.addEventListener('keydown', handleKeyPress);
+    } catch (err) {
+      console.error('Error adding keyboard event listener:', err);
+    }
+    
+    return () => {
+      try {
+        window.removeEventListener('keydown', handleKeyPress);
+      } catch (err) {
+        console.error('Error removing keyboard event listener:', err);
+      }
+    };
   }, [fetchMetrics]);
 
   // Calculate financial metrics
@@ -1084,23 +1125,71 @@ export default function Dashboard() {
 
   return (
     <TooltipProvider>
-      <div className="space-y-6 relative">
-        {/* Decorative gradient orb */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl -z-10 opacity-50" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl -z-10 opacity-50" />
+      <div className="space-y-6 relative min-h-screen pb-8">
+        {/* Enhanced decorative gradient orbs with animation */}
+        <motion.div
+          animate={{
+            scale: [1, 1.1, 1],
+            opacity: [0.4, 0.6, 0.4],
+          }}
+          transition={{
+            duration: 8,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+          className="absolute top-0 right-0 w-[500px] h-[500px] bg-gradient-to-br from-primary/20 via-primary/10 to-transparent rounded-full blur-3xl -z-10"
+        />
+        <motion.div
+          animate={{
+            scale: [1.1, 1, 1.1],
+            opacity: [0.3, 0.5, 0.3],
+          }}
+          transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 1
+          }}
+          className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-gradient-to-tr from-accent/20 via-accent/10 to-transparent rounded-full blur-3xl -z-10"
+        />
+        <motion.div
+          animate={{
+            scale: [1, 1.05, 1],
+            opacity: [0.2, 0.4, 0.2],
+          }}
+          transition={{
+            duration: 12,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 2
+          }}
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-secondary/15 via-secondary/5 to-transparent rounded-full blur-3xl -z-10"
+        />
+        
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6"
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8"
         >
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-primary bg-clip-text text-transparent mb-2">
+          <div className="space-y-2">
+            <motion.h1 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="text-5xl font-extrabold bg-gradient-to-r from-foreground via-primary/90 to-accent bg-clip-text text-transparent mb-2 tracking-tight"
+            >
               Dashboard
-            </h1>
-            <p className="text-muted-foreground text-lg flex items-center gap-2">
+            </motion.h1>
+            <motion.p 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="text-muted-foreground text-lg flex items-center gap-2 font-medium"
+            >
+              <div className="h-1 w-1 rounded-full bg-primary animate-pulse mr-1" />
               Cross-DEX Liquidity Execution Overview
-            </p>
+            </motion.p>
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus showLabel={false} size="sm" />
@@ -1167,13 +1256,25 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-      {/* Mock Data Indicator */}
-      {usingMockData && !loading && metrics && (
-        <Alert className="border-yellow-500/50 bg-yellow-500/10">
-          <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-500" />
+      {/* Backend Connection Status Indicator */}
+      {!backendConnected && !loading && (
+        <Alert className="border-orange-500/50 bg-gradient-to-r from-orange-500/10 via-orange-500/5 to-orange-500/10 backdrop-blur-sm shadow-md">
+          <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-500" />
           <AlertDescription className="flex items-center justify-between">
-            <span className="text-sm">
-              <strong>Demo Mode:</strong> Backend not connected. Showing simulated data. 
+            <span className="text-sm font-medium">
+              Backend API is offline. Showing fallback data. Ensure the backend server is running at <code className="text-xs bg-background/50 px-1 py-0.5 rounded">http://localhost:8000</code>
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+      
+      {/* Mock Data Indicator */}
+      {usingMockData && backendConnected && !loading && metrics && (
+        <Alert className="border-yellow-500/50 bg-gradient-to-r from-yellow-500/10 via-yellow-500/5 to-yellow-500/10 backdrop-blur-sm shadow-md">
+          <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-500 animate-pulse" />
+          <AlertDescription className="flex items-center justify-between">
+            <span className="text-sm font-medium">
+              <strong className="text-yellow-600 dark:text-yellow-500">Demo Mode:</strong> Backend not connected. Showing simulated data. 
               Start the backend at <code className="text-xs bg-muted px-1 py-0.5 rounded mx-1">cleo_project/backend</code> for live blockchain data.
             </span>
             <Button
@@ -1245,11 +1346,12 @@ export default function Dashboard() {
       ) : (
         <>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="grid w-full max-w-lg grid-cols-4">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="financials">Financials</TabsTrigger>
-              <TabsTrigger value="analytics">Analytics</TabsTrigger>
-              <TabsTrigger value="governance">Governance</TabsTrigger>
+            <TabsList className="grid w-full max-w-2xl grid-cols-5 bg-muted/50 border border-border/60 backdrop-blur-sm shadow-md p-1.5 rounded-xl">
+              <TabsTrigger value="overview" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Overview</TabsTrigger>
+              <TabsTrigger value="financials" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Financials</TabsTrigger>
+              <TabsTrigger value="analytics" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Analytics</TabsTrigger>
+              <TabsTrigger value="governance" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Governance</TabsTrigger>
+              <TabsTrigger value="cronos" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Cronos</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
@@ -1264,19 +1366,20 @@ export default function Dashboard() {
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Card className="relative overflow-hidden border-border/50 hover:border-primary/30 transition-all duration-300 group cursor-pointer">
-                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Card className="relative overflow-hidden border border-border/60 bg-card/50 backdrop-blur-sm hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 group cursor-pointer shadow-md">
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/8 via-primary/4 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                       <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                           Cronos Network
-                          <Info className="h-3 w-3 opacity-50" />
+                          <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                         </CardTitle>
-                        <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                        <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 group-hover:from-primary/25 group-hover:to-primary/10 transition-all duration-300 group-hover:scale-110 shadow-sm">
                           <Network className="h-4 w-4 text-primary" />
                         </div>
                       </CardHeader>
                       <CardContent className="relative z-10">
-                        <div className="text-2xl font-bold mb-1">
+                        <div className="text-2xl font-bold mb-1 bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
                           Block #{(() => {
                             try {
                               const block = blockchainData.currentBlock;
@@ -1355,19 +1458,20 @@ export default function Dashboard() {
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Card className="relative overflow-hidden border-border/50 hover:border-accent/30 transition-all duration-300 group cursor-pointer">
-                      <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Card className="relative overflow-hidden border border-border/60 bg-card/50 backdrop-blur-sm hover:border-accent/50 hover:shadow-lg hover:shadow-accent/10 transition-all duration-300 group cursor-pointer shadow-md">
+                      <div className="absolute inset-0 bg-gradient-to-br from-accent/8 via-accent/4 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-accent/5 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                       <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                           Your Balance
-                          <Info className="h-3 w-3 opacity-50" />
+                          <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                         </CardTitle>
-                        <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                        <div className="p-2.5 rounded-xl bg-gradient-to-br from-accent/15 to-accent/5 group-hover:from-accent/25 group-hover:to-accent/10 transition-all duration-300 group-hover:scale-110 shadow-sm">
                           <Coins className="h-4 w-4 text-accent" />
                         </div>
                       </CardHeader>
                       <CardContent className="relative z-10">
-                        <div className="text-2xl font-bold mb-1">
+                        <div className="text-2xl font-bold mb-1 bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
                           {(() => {
                             try {
                               if (balanceData && typeof balanceData.value === 'bigint' && typeof balanceData.decimals === 'number') {
@@ -1404,20 +1508,21 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-primary/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-primary">
-                    <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <Card className="relative overflow-hidden border border-primary/20 bg-gradient-to-br from-card via-card to-primary/5 backdrop-blur-sm hover:border-primary/50 hover:shadow-xl hover:shadow-primary/20 transition-all duration-300 group cursor-pointer shadow-lg">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-primary/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-primary/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute -inset-[1px] bg-gradient-to-r from-primary/40 via-primary/20 to-primary/40 rounded-lg opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300 -z-10" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         Total Volume
-                        <Info className="h-3 w-3 opacity-50" />
+                        <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                       </CardTitle>
-                      <div className="p-2.5 rounded-xl bg-primary/15 group-hover:bg-primary/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/20">
+                      <div className="p-3 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 group-hover:from-primary/30 group-hover:to-primary/15 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-xl group-hover:shadow-primary/30 border border-primary/20">
                         <TrendingUp className="h-4 w-4 text-primary" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-primary via-primary/90 to-primary/70 bg-clip-text text-transparent">
+                      <div className="text-3xl font-extrabold mb-1 bg-gradient-to-r from-primary via-primary/90 to-primary/70 bg-clip-text text-transparent drop-shadow-sm">
                         {metrics?.total_volume_usd ? formatCurrency(metrics.total_volume_usd) : '$0'}
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -1442,20 +1547,21 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-secondary/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-secondary">
-                    <div className="absolute inset-0 bg-gradient-to-br from-secondary/10 via-secondary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <Card className="relative overflow-hidden border border-secondary/20 bg-gradient-to-br from-card via-card to-secondary/5 backdrop-blur-sm hover:border-secondary/50 hover:shadow-xl hover:shadow-secondary/20 transition-all duration-300 group cursor-pointer shadow-lg">
+                    <div className="absolute inset-0 bg-gradient-to-br from-secondary/15 via-secondary/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-secondary/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute -inset-[1px] bg-gradient-to-r from-secondary/40 via-secondary/20 to-secondary/40 rounded-lg opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300 -z-10" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         Executions
-                        <Info className="h-3 w-3 opacity-50" />
+                        <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                       </CardTitle>
-                      <div className="p-2.5 rounded-xl bg-secondary/15 group-hover:bg-secondary/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-secondary/20">
+                      <div className="p-3 rounded-xl bg-gradient-to-br from-secondary/20 to-secondary/10 group-hover:from-secondary/30 group-hover:to-secondary/15 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-xl group-hover:shadow-secondary/30 border border-secondary/20">
                         <Zap className="h-4 w-4 text-secondary" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-secondary via-secondary/90 to-secondary/70 bg-clip-text text-transparent">
+                      <div className="text-3xl font-extrabold mb-1 bg-gradient-to-r from-secondary via-secondary/90 to-secondary/70 bg-clip-text text-transparent drop-shadow-sm">
                         {(() => {
                           try {
                             const executions = metrics?.total_executions;
@@ -1490,20 +1596,21 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-accent/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-accent">
-                    <div className="absolute inset-0 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-accent/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <Card className="relative overflow-hidden border border-green-500/20 bg-gradient-to-br from-card via-card to-green-500/5 backdrop-blur-sm hover:border-green-500/50 hover:shadow-xl hover:shadow-green-500/20 transition-all duration-300 group cursor-pointer shadow-lg">
+                    <div className="absolute inset-0 bg-gradient-to-br from-green-500/15 via-green-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-green-500/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute -inset-[1px] bg-gradient-to-r from-green-500/40 via-green-500/20 to-green-500/40 rounded-lg opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300 -z-10" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         Avg Savings
-                        <Info className="h-3 w-3 opacity-50" />
+                        <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                       </CardTitle>
-                      <div className="p-2.5 rounded-xl bg-accent/15 group-hover:bg-accent/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-accent/20">
-                        <PieChart className="h-4 w-4 text-accent" />
+                      <div className="p-3 rounded-xl bg-gradient-to-br from-green-500/20 to-green-500/10 group-hover:from-green-500/30 group-hover:to-green-500/15 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-xl group-hover:shadow-green-500/30 border border-green-500/20">
+                        <PieChart className="h-4 w-4 text-green-500" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-green-500 via-green-400 to-green-500 bg-clip-text text-transparent flex items-center gap-2">
+                      <div className="text-3xl font-extrabold mb-1 bg-gradient-to-r from-green-500 via-green-400 to-green-500 bg-clip-text text-transparent flex items-center gap-2 drop-shadow-sm">
                         {(() => {
                           try {
                             const savings = metrics?.avg_savings_pct;
@@ -1539,34 +1646,50 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className={`relative overflow-hidden border-border/50 transition-all duration-300 group cursor-pointer card-gradient ${metrics?.agent_status === 'active' ? 'hover:border-green-500/40 hover:shadow-[0_0_50px_hsl(142_76%_36%_/_0.3)]' : ''}`}>
-                    <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/10 via-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
-                    <div className={`absolute top-0 right-0 w-32 h-32 ${metrics?.agent_status === 'active' ? 'bg-green-500/5' : 'bg-muted/5'} rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+                  <Card className={`relative overflow-hidden border ${metrics?.agent_status === 'active' ? 'border-green-500/30 bg-gradient-to-br from-card via-card to-green-500/5' : 'border-border/60 bg-card/50'} backdrop-blur-sm transition-all duration-300 group cursor-pointer shadow-lg ${metrics?.agent_status === 'active' ? 'hover:border-green-500/60 hover:shadow-xl hover:shadow-green-500/30' : 'hover:border-border hover:shadow-md'}`}>
+                    <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/15 via-green-500/8' : 'from-muted/8 via-muted/4'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                    <div className={`absolute top-0 right-0 w-40 h-40 ${metrics?.agent_status === 'active' ? 'bg-green-500/10' : 'bg-muted/5'} rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+                    {metrics?.agent_status === 'active' && (
+                      <div className="absolute -inset-[1px] bg-gradient-to-r from-green-500/40 via-green-500/20 to-green-500/40 rounded-lg opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300 -z-10" />
+                    )}
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         Agent Status
-                        <Info className="h-3 w-3 opacity-50" />
+                        <Info className="h-3 w-3 opacity-50 group-hover:opacity-70 transition-opacity" />
                       </CardTitle>
-                      <div className={`p-2.5 rounded-xl transition-all duration-300 group-hover:scale-110 ${metrics?.agent_status === 'active' ? 'bg-green-500/15 group-hover:bg-green-500/25 group-hover:shadow-lg group-hover:shadow-green-500/20' : 'bg-muted/20'}`}>
+                      <div className={`p-3 rounded-xl transition-all duration-300 group-hover:scale-110 ${metrics?.agent_status === 'active' ? 'bg-gradient-to-br from-green-500/20 to-green-500/10 group-hover:from-green-500/30 group-hover:to-green-500/15 group-hover:shadow-xl group-hover:shadow-green-500/30 border border-green-500/20' : 'bg-muted/20 border border-border/50'}`}>
                         <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
                       <div className="flex items-center gap-2 mb-1">
-                        <div className={`text-2xl font-bold bg-gradient-to-r ${metrics?.agent_status === 'active' ? 'from-green-500 via-green-400 to-green-500' : 'from-muted-foreground to-muted-foreground/70'} bg-clip-text text-transparent`}>
-                          {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
+                        <div className={`text-2xl font-extrabold bg-gradient-to-r ${(metrics?.agent_status === 'active' || agentStatus?.status === 'online') ? 'from-green-500 via-green-400 to-green-500' : 'from-muted-foreground to-muted-foreground/70'} bg-clip-text text-transparent drop-shadow-sm`}>
+                          {(metrics?.agent_status === 'active' || agentStatus?.status === 'online') ? 'Active' : 'Offline'}
                         </div>
-                        {metrics?.agent_status === 'active' && (
+                        {(metrics?.agent_status === 'active' || agentStatus?.status === 'online') && (
                           <Badge variant="outline" className="border-green-500/40 text-green-500 bg-green-500/10 text-xs px-2 py-0.5 animate-pulse">
                             Live
                           </Badge>
                         )}
+                        {agentStatus && backendConnected && (
+                          <Badge variant="outline" className="border-blue-500/40 text-blue-500 bg-blue-500/10 text-xs px-2 py-0.5">
+                            Backend
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                        {metrics?.agent_status === 'active' && (
+                        {(metrics?.agent_status === 'active' || agentStatus?.status === 'online') && (
                           <div className="w-1.5 h-1.5 rounded-full bg-green-500/60 animate-pulse" />
                         )}
                         AI routing status
+                        {agentStatus && (
+                          <span className="ml-1">
+                            • {agentStatus.decisions_today || 0} decisions today
+                            {agentStatus.avg_response_time_ms && (
+                              <span className="text-xs opacity-75"> • {agentStatus.avg_response_time_ms}ms avg</span>
+                            )}
+                          </span>
+                        )}
                       </p>
                     </CardContent>
                   </Card>
@@ -1586,13 +1709,15 @@ export default function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5, duration: 0.4 }}
             >
-              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
-                <CardHeader className="pb-3 border-b border-border/30">
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <div className="p-2 rounded-lg bg-primary/15">
+              <Card className="border border-border/60 bg-card/50 backdrop-blur-sm hover:border-primary/40 hover:shadow-xl hover:shadow-primary/10 transition-all duration-300 shadow-lg">
+                <CardHeader className="pb-3 border-b border-border/30 bg-gradient-to-r from-transparent via-border/10 to-transparent">
+                  <CardTitle className="flex items-center gap-3 text-lg font-semibold">
+                    <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20 shadow-sm">
                       <TrendingUp className="h-5 w-5 text-primary" />
                     </div>
-                    Metrics Trends
+                    <span className="bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                      Metrics Trends
+                    </span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-4">
@@ -2769,6 +2894,72 @@ export default function Dashboard() {
                 </Alert>
               </motion.div>
             )}
+          </TabsContent>
+
+          <TabsContent value="cronos" className="space-y-6">
+            {/* Cronos-Specific Features */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="space-y-2 mb-6">
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Network className="h-6 w-6 text-primary" />
+                  Cronos Ecosystem
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Explore Cronos-specific features, DEX analytics, validator stats, and ecosystem tokens
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Network Status Row */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <CronosNetworkStatus />
+              </motion.div>
+              
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <CronosValidatorStats />
+              </motion.div>
+            </div>
+
+            {/* DEX Analytics */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+            >
+              <CronosDEXAnalytics />
+            </motion.div>
+
+            {/* Ecosystem Explorer and Pool Browser */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 }}
+              >
+                <CronosEcosystemExplorer />
+              </motion.div>
+              
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.6 }}
+              >
+                <CronosDEXPoolBrowser />
+              </motion.div>
+            </div>
           </TabsContent>
         </Tabs>
         </>

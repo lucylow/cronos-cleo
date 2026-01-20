@@ -562,6 +562,7 @@ export default function CLEOFrontend() {
   const [routes, setRoutes] = useState(suggestSplits(100000, MOCK_POOLS, 5));
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(false);
   const [history, setHistory] = useState<{ time: string; value: number }[]>(() => {
     const now = Date.now();
     return Array.from({ length: 20 }).map((_, i) => ({

@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { WagmiProvider } from 'wagmi';
 import { config } from '@/lib/wagmiConfig';
 import { WalletProvider } from "@/wallet/WalletProvider";
@@ -51,6 +51,7 @@ const App = () => (
                 {/* App routes with sidebar layout */}
                 <Route element={<AppLayout />}>
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/execution/route" element={<Navigate to="/execution/routes" replace />} />
                   <Route path="/execution/routes" element={<CLEOFrontend />} />
                   <Route path="/execution/simulator" element={<CLEOFrontend />} />
                   <Route path="/agent" element={<Agent />} />
