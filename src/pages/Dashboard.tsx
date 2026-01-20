@@ -16,6 +16,7 @@ import { CronosNetworkStatus } from '@/components/CronosNetworkStatus';
 import { useCronosBlockchain } from '@/hooks/useCronosBlockchain';
 import { useBalance, useAccount } from 'wagmi';
 import { formatUnits } from 'viem';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface DashboardMetrics {
   total_volume_usd?: number;
@@ -161,11 +162,14 @@ export default function Dashboard() {
               data.total_executions !== undefined && 
               data.avg_savings_pct !== undefined) {
             setMetricsHistory(prev => {
+              const financialSummary = data.financial_summary || {};
               const newEntry = {
                 timestamp: Date.now(),
                 volume: data.total_volume_usd || 0,
                 executions: data.total_executions || 0,
-                savings: data.avg_savings_pct || 0
+                savings: data.avg_savings_pct || 0,
+                profit: financialSummary.total_profit_usd || 0,
+                costs: financialSummary.total_costs_usd || 0
               };
               return [...prev, newEntry].slice(-24);
             });
