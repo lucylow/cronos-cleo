@@ -143,28 +143,40 @@ export default function Dashboard() {
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'nextProposalId',
-    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+    query: { 
+      enabled: !!daoAddress && daoAddress.startsWith('0x'), 
+      retry: 2 
+    },
   });
 
   const { data: quorumPercentage } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'quorumPercentage',
-    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+    query: { 
+      enabled: !!daoAddress && daoAddress.startsWith('0x'), 
+      retry: 2 
+    },
   });
 
   const { data: proposalThreshold } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'proposalThreshold',
-    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+    query: { 
+      enabled: !!daoAddress && daoAddress.startsWith('0x'), 
+      retry: 2 
+    },
   });
 
   const { data: votingPeriod } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'votingPeriod',
-    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+    query: { 
+      enabled: !!daoAddress && daoAddress.startsWith('0x'), 
+      retry: 2 
+    },
   });
 
   // Get governance token address and user balance
@@ -172,7 +184,10 @@ export default function Dashboard() {
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'governanceToken',
-    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+    query: { 
+      enabled: !!daoAddress && daoAddress.startsWith('0x'), 
+      retry: 2 
+    },
   });
 
   const { data: votingPower } = useReadContract({
@@ -188,7 +203,10 @@ export default function Dashboard() {
     ],
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
-    query: { enabled: !!governanceTokenAddress && !!address, retry: 2 },
+    query: { 
+      enabled: !!governanceTokenAddress && !!address, 
+      retry: 2 
+    },
   });
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
@@ -2773,7 +2791,11 @@ function ProposalPreviewCard({
     abi: DAO_ABI,
     functionName: 'proposals',
     args: [proposalId],
-    query: { retry: 2, retryDelay: 1000 },
+    query: { 
+      enabled: !!daoAddress,
+      retry: 2, 
+      retryDelay: 1000 
+    },
   });
 
   if (isLoading) {
