@@ -83,7 +83,26 @@ export default function Dashboard() {
       }
       
       // Try to fetch from API - will automatically fallback to mock data on failure
-      const data = await api.getDashboardMetrics();
+      let data: DashboardMetrics | null = null;
+      try {
+        data = await api.getDashboardMetrics();
+        
+        // Validate data structure
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid response data format');
+        }
+      } catch (fetchErr) {
+        console.error('API fetch error:', fetchErr);
+        // If API client didn't provide fallback mock data, use empty metrics
+        data = {
+          total_volume_usd: 0,
+          total_executions: 0,
+          avg_savings_pct: 0,
+          agent_status: 'offline',
+          success_rate: 0,
+          recent_executions: [],
+        };
+      }
       
       // Check if this is mock data by checking if backend is actually available
       // Do this check in parallel to avoid delaying the display
@@ -91,7 +110,8 @@ export default function Dashboard() {
         .then(isAvailable => {
           setUsingMockData(!isAvailable || !data || Object.keys(data).length === 0);
         })
-        .catch(() => {
+        .catch((healthErr) => {
+          console.warn('Health check failed:', healthErr);
           setUsingMockData(true);
         });
       
@@ -99,30 +119,74 @@ export default function Dashboard() {
       setLastUpdate(new Date());
       
       // Add to history for chart (keep last 24 data points)
-      if (data.total_volume_usd !== undefined && data.total_executions !== undefined && data.avg_savings_pct !== undefined) {
-        setMetricsHistory(prev => {
-          const financialSummary = data.financial_summary || {};
-          const newEntry = {
-            timestamp: Date.now(),
-            volume: data.total_volume_usd || 0,
-            executions: data.total_executions || 0,
-            savings: data.avg_savings_pct || 0,
-            profit: financialSummary.total_profit_usd || 0,
-            costs: financialSummary.total_costs_usd || 0
-          };
-          const updated = [...prev, newEntry].slice(-24);
-          return updated;
-        });
+      try {
+        if (data && 
+            typeof data.total_volume_usd === 'number' && 
+            typeof data.total_executions === 'number' && 
+            typeof data.avg_savings_pct === 'number' &&
+            !isNaN(data.total_volume_usd) &&
+            !isNaN(data.total_executions) &&
+            !isNaN(data.avg_savings_pct)) {
+          setMetricsHistory(prev => {
+            try {
+              const financialSummary = data?.financial_summary || {};
+              const newEntry = {
+                timestamp: Date.now(),
+                volume: data.total_volume_usd || 0,
+                executions: data.total_executions || 0,
+                savings: data.avg_savings_pct || 0,
+                profit: typeof financialSummary.total_profit_usd === 'number' && !isNaN(financialSummary.total_profit_usd) 
+                  ? financialSummary.total_profit_usd 
+                  : 0,
+                costs: typeof financialSummary.total_costs_usd === 'number' && !isNaN(financialSummary.total_costs_usd)
+                  ? financialSummary.total_costs_usd
+                  : 0
+              };
+              const updated = [...prev, newEntry].slice(-24);
+              return updated;
+            } catch (historyErr) {
+              console.error('Error updating metrics history:', historyErr);
+              return prev;
+            }
+          });
+        }
+      } catch (historyErr) {
+        console.error('Error processing metrics history:', historyErr);
       }
     } catch (err) {
-      // Even if there's an error, mock data should have been returned by the API client
-      // But if it's still null, we have a problem
-      const errorMessage = err instanceof ApiClientError 
-        ? err.message 
-        : 'Failed to load dashboard metrics';
+      // Comprehensive error handling
+      let errorMessage = 'Failed to load dashboard metrics';
+      
+      if (err instanceof ApiClientError) {
+        errorMessage = err.message || errorMessage;
+        if (err.status === 404) {
+          errorMessage = 'Dashboard metrics endpoint not found';
+        } else if (err.status === 500) {
+          errorMessage = 'Server error while loading metrics';
+        } else if (err.status === 503) {
+          errorMessage = 'Service temporarily unavailable';
+        } else if (err.status) {
+          errorMessage = `Error ${err.status}: ${err.message}`;
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message || errorMessage;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
+      
       console.error('Failed to load dashboard metrics:', err);
       setError(errorMessage);
       setUsingMockData(true);
+      
+      // Set minimal metrics structure to prevent rendering errors
+      setMetrics({
+        total_volume_usd: 0,
+        total_executions: 0,
+        avg_savings_pct: 0,
+        agent_status: 'offline',
+        success_rate: 0,
+        recent_executions: [],
+      });
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -144,66 +208,129 @@ export default function Dashboard() {
       wsManager = getDashboardMetricsWebSocket();
       
       const handleOpen = () => {
-        setWsConnected(true);
+        try {
+          setWsConnected(true);
+        } catch (err) {
+          console.error('Error handling WebSocket open:', err);
+        }
       };
 
       const handleClose = () => {
+        try {
+          setWsConnected(false);
+        } catch (err) {
+          console.error('Error handling WebSocket close:', err);
+        }
+      };
+
+      const handleError = (error: Error | Event) => {
+        console.error('WebSocket error:', error);
         setWsConnected(false);
       };
 
       const handleMessage = (message: WebSocketMessage) => {
-        if (message.type === 'metrics_update' && message.data) {
-          setMetrics(message.data as DashboardMetrics);
-          setLastUpdate(new Date());
-          
-          // Add to history
-          const data = message.data as DashboardMetrics;
-          if (data.total_volume_usd !== undefined && 
-              data.total_executions !== undefined && 
-              data.avg_savings_pct !== undefined) {
-            setMetricsHistory(prev => {
-              const financialSummary = data.financial_summary || {};
-              const newEntry = {
-                timestamp: Date.now(),
-                volume: data.total_volume_usd || 0,
-                executions: data.total_executions || 0,
-                savings: data.avg_savings_pct || 0,
-                profit: financialSummary.total_profit_usd || 0,
-                costs: financialSummary.total_costs_usd || 0
-              };
-              return [...prev, newEntry].slice(-24);
-            });
+        try {
+          if (!message || typeof message !== 'object') {
+            console.warn('Invalid WebSocket message format:', message);
+            return;
           }
+
+          if (message.type === 'metrics_update' && message.data) {
+            try {
+              const data = message.data as DashboardMetrics;
+              
+              // Validate data structure
+              if (!data || typeof data !== 'object') {
+                console.warn('Invalid metrics data in WebSocket message');
+                return;
+              }
+
+              setMetrics(data);
+              setLastUpdate(new Date());
+              
+              // Add to history with validation
+              if (typeof data.total_volume_usd === 'number' && 
+                  typeof data.total_executions === 'number' && 
+                  typeof data.avg_savings_pct === 'number' &&
+                  !isNaN(data.total_volume_usd) &&
+                  !isNaN(data.total_executions) &&
+                  !isNaN(data.avg_savings_pct)) {
+                setMetricsHistory(prev => {
+                  try {
+                    const financialSummary = data.financial_summary || {};
+                    const newEntry = {
+                      timestamp: Date.now(),
+                      volume: data.total_volume_usd || 0,
+                      executions: data.total_executions || 0,
+                      savings: data.avg_savings_pct || 0,
+                      profit: typeof financialSummary.total_profit_usd === 'number' && !isNaN(financialSummary.total_profit_usd)
+                        ? financialSummary.total_profit_usd
+                        : 0,
+                      costs: typeof financialSummary.total_costs_usd === 'number' && !isNaN(financialSummary.total_costs_usd)
+                        ? financialSummary.total_costs_usd
+                        : 0
+                    };
+                    return [...prev, newEntry].slice(-24);
+                  } catch (historyErr) {
+                    console.error('Error updating history from WebSocket:', historyErr);
+                    return prev;
+                  }
+                });
+              }
+            } catch (dataErr) {
+              console.error('Error processing WebSocket metrics data:', dataErr);
+            }
+          }
+        } catch (messageErr) {
+          console.error('Error handling WebSocket message:', messageErr);
         }
       };
 
       const handleStateChange = (state: { state: WebSocketState }) => {
-        setWsConnected(state.state === WebSocketState.CONNECTED);
+        try {
+          if (state && typeof state.state === 'number') {
+            setWsConnected(state.state === WebSocketState.CONNECTED);
+          }
+        } catch (err) {
+          console.error('Error handling WebSocket state change:', err);
+        }
       };
 
       wsManager.on('open', handleOpen);
       wsManager.on('close', handleClose);
+      wsManager.on('error', handleError);
       wsManager.on('message', handleMessage);
       wsManager.on('statechange', handleStateChange);
 
       // Connect if not already connected
-      if (wsManager.getState() === WebSocketState.DISCONNECTED) {
-        wsManager.connect();
-      } else {
-        setWsConnected(wsManager.isConnected());
+      try {
+        if (wsManager.getState() === WebSocketState.DISCONNECTED) {
+          wsManager.connect();
+        } else {
+          setWsConnected(wsManager.isConnected());
+        }
+      } catch (connectErr) {
+        console.error('Error connecting WebSocket:', connectErr);
+        setWsConnected(false);
       }
 
       return () => {
-        if (wsManager) {
-          wsManager.off('open', handleOpen);
-          wsManager.off('close', handleClose);
-          wsManager.off('message', handleMessage);
-          wsManager.off('statechange', handleStateChange);
-          // Don't disconnect, let it stay connected for other components
+        try {
+          if (wsManager) {
+            wsManager.off('open', handleOpen);
+            wsManager.off('close', handleClose);
+            wsManager.off('error', handleError);
+            wsManager.off('message', handleMessage);
+            wsManager.off('statechange', handleStateChange);
+            // Don't disconnect, let it stay connected for other components
+          }
+        } catch (cleanupErr) {
+          console.error('Error cleaning up WebSocket:', cleanupErr);
         }
       };
     } catch (error) {
-      console.warn('WebSocket not available:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('WebSocket setup failed:', errorMessage, error);
       setWsConnected(false);
     }
   }, []);
@@ -222,27 +349,72 @@ export default function Dashboard() {
 
   // Calculate financial metrics
   const financialMetrics = useMemo(() => {
-    const summary = metrics?.financial_summary || {};
-    const totalVolume = metrics?.total_volume_usd || 0;
-    const totalExecutions = metrics?.total_executions || 0;
-    const totalGas = summary.total_gas_costs_usd || 0;
-    const totalFees = summary.total_protocol_fees_usd || 0;
-    const totalCosts = summary.total_costs_usd || totalGas + totalFees;
-    const totalProfit = summary.total_profit_usd || 0;
-    const netProfit = totalProfit - totalCosts;
-    const roi = totalVolume > 0 ? ((netProfit / totalVolume) * 100) : 0;
-    const avgProfitPerExecution = totalExecutions > 0 ? (netProfit / totalExecutions) : 0;
+    try {
+      const summary = metrics?.financial_summary || {};
+      
+      // Safely extract and validate numeric values
+      const totalVolume = typeof metrics?.total_volume_usd === 'number' && !isNaN(metrics.total_volume_usd)
+        ? Math.max(0, metrics.total_volume_usd)
+        : 0;
+      const totalExecutions = typeof metrics?.total_executions === 'number' && !isNaN(metrics.total_executions)
+        ? Math.max(0, metrics.total_executions)
+        : 0;
+      
+      const totalGas = typeof summary.total_gas_costs_usd === 'number' && !isNaN(summary.total_gas_costs_usd)
+        ? Math.max(0, summary.total_gas_costs_usd)
+        : 0;
+      const totalFees = typeof summary.total_protocol_fees_usd === 'number' && !isNaN(summary.total_protocol_fees_usd)
+        ? Math.max(0, summary.total_protocol_fees_usd)
+        : 0;
+      
+      const totalCostsFromSummary = typeof summary.total_costs_usd === 'number' && !isNaN(summary.total_costs_usd)
+        ? Math.max(0, summary.total_costs_usd)
+        : null;
+      
+      const totalCosts = totalCostsFromSummary !== null ? totalCostsFromSummary : (totalGas + totalFees);
+      const totalProfit = typeof summary.total_profit_usd === 'number' && !isNaN(summary.total_profit_usd)
+        ? summary.total_profit_usd
+        : 0;
+      
+      const netProfit = totalProfit - totalCosts;
+      
+      // Safe division with validation
+      const roi = totalVolume > 0 && isFinite(totalVolume) && isFinite(netProfit)
+        ? ((netProfit / totalVolume) * 100)
+        : 0;
+      
+      const avgProfitPerExecution = totalExecutions > 0 && isFinite(totalExecutions) && isFinite(netProfit)
+        ? (netProfit / totalExecutions)
+        : 0;
+      
+      const avgCostPerExecution = totalExecutions > 0 && isFinite(totalExecutions) && isFinite(totalCosts)
+        ? (totalCosts / totalExecutions)
+        : 0;
 
-    return {
-      totalProfit,
-      totalCosts,
-      totalGas,
-      totalFees,
-      netProfit,
-      roi,
-      avgProfitPerExecution,
-      avgCostPerExecution: totalExecutions > 0 ? (totalCosts / totalExecutions) : 0,
-    };
+      return {
+        totalProfit,
+        totalCosts,
+        totalGas,
+        totalFees,
+        netProfit,
+        roi: isFinite(roi) ? roi : 0,
+        avgProfitPerExecution: isFinite(avgProfitPerExecution) ? avgProfitPerExecution : 0,
+        avgCostPerExecution: isFinite(avgCostPerExecution) ? avgCostPerExecution : 0,
+      };
+    } catch (err) {
+      console.error('Error calculating financial metrics:', err);
+      // Return safe defaults
+      return {
+        totalProfit: 0,
+        totalCosts: 0,
+        totalGas: 0,
+        totalFees: 0,
+        netProfit: 0,
+        roi: 0,
+        avgProfitPerExecution: 0,
+        avgCostPerExecution: 0,
+      };
+    }
   }, [metrics]);
 
   // DEX distribution data for pie chart
