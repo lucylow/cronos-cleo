@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download, Network, Coins } from 'lucide-react';
+import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download, Network, Coins, DollarSign, TrendingDown, Wallet, BarChart3, FileSpreadsheet } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,10 +8,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { api, ApiClientError } from '@/lib/api';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
-import { getDashboardMetricsWebSocket, WebSocketState } from '@/lib/websocket';
+import { getDashboardMetricsWebSocket, WebSocketState, WebSocketMessage } from '@/lib/websocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { CronosNetworkStatus } from '@/components/CronosNetworkStatus';
 import { useCronosBlockchain } from '@/hooks/useCronosBlockchain';
 import { useBalance, useAccount } from 'wagmi';
@@ -32,7 +32,20 @@ interface DashboardMetrics {
     amount_out: number;
     savings_pct: number;
     status: string;
+    gas_cost_usd?: number;
+    protocol_fee_usd?: number;
+    profit_usd?: number;
+    dex_distribution?: Record<string, number>;
   }>;
+  financial_summary?: {
+    total_profit_usd?: number;
+    total_costs_usd?: number;
+    total_gas_costs_usd?: number;
+    total_protocol_fees_usd?: number;
+    roi_pct?: number;
+    avg_profit_per_execution?: number;
+  };
+  dex_distribution?: Record<string, { volume: number; count: number; percentage: number }>;
 }
 
 export default function Dashboard() {
@@ -41,9 +54,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number }>>([]);
+  const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number; profit: number; costs: number }>>([]);
   const [usingMockData, setUsingMockData] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Cronos blockchain data
   const { data: blockchainData, isConnected: isBlockchainConnected } = useCronosBlockchain({
@@ -86,11 +100,14 @@ export default function Dashboard() {
       // Add to history for chart (keep last 24 data points)
       if (data.total_volume_usd !== undefined && data.total_executions !== undefined && data.avg_savings_pct !== undefined) {
         setMetricsHistory(prev => {
+          const financialSummary = data.financial_summary || {};
           const newEntry = {
             timestamp: Date.now(),
             volume: data.total_volume_usd || 0,
             executions: data.total_executions || 0,
-            savings: data.avg_savings_pct || 0
+            savings: data.avg_savings_pct || 0,
+            profit: financialSummary.total_profit_usd || 0,
+            costs: financialSummary.total_costs_usd || 0
           };
           const updated = [...prev, newEntry].slice(-24);
           return updated;
@@ -133,21 +150,22 @@ export default function Dashboard() {
         setWsConnected(false);
       };
 
-      const handleMessage = (message: any) => {
+      const handleMessage = (message: WebSocketMessage) => {
         if (message.type === 'metrics_update' && message.data) {
-          setMetrics(message.data);
+          setMetrics(message.data as DashboardMetrics);
           setLastUpdate(new Date());
           
           // Add to history
-          if (message.data.total_volume_usd !== undefined && 
-              message.data.total_executions !== undefined && 
-              message.data.avg_savings_pct !== undefined) {
+          const data = message.data as DashboardMetrics;
+          if (data.total_volume_usd !== undefined && 
+              data.total_executions !== undefined && 
+              data.avg_savings_pct !== undefined) {
             setMetricsHistory(prev => {
               const newEntry = {
                 timestamp: Date.now(),
-                volume: message.data.total_volume_usd || 0,
-                executions: message.data.total_executions || 0,
-                savings: message.data.avg_savings_pct || 0
+                volume: data.total_volume_usd || 0,
+                executions: data.total_executions || 0,
+                savings: data.avg_savings_pct || 0
               };
               return [...prev, newEntry].slice(-24);
             });
@@ -198,6 +216,68 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [fetchMetrics]);
 
+  // Calculate financial metrics
+  const financialMetrics = useMemo(() => {
+    const summary = metrics?.financial_summary || {};
+    const totalVolume = metrics?.total_volume_usd || 0;
+    const totalExecutions = metrics?.total_executions || 0;
+    const totalGas = summary.total_gas_costs_usd || 0;
+    const totalFees = summary.total_protocol_fees_usd || 0;
+    const totalCosts = summary.total_costs_usd || totalGas + totalFees;
+    const totalProfit = summary.total_profit_usd || 0;
+    const netProfit = totalProfit - totalCosts;
+    const roi = totalVolume > 0 ? ((netProfit / totalVolume) * 100) : 0;
+    const avgProfitPerExecution = totalExecutions > 0 ? (netProfit / totalExecutions) : 0;
+
+    return {
+      totalProfit,
+      totalCosts,
+      totalGas,
+      totalFees,
+      netProfit,
+      roi,
+      avgProfitPerExecution,
+      avgCostPerExecution: totalExecutions > 0 ? (totalCosts / totalExecutions) : 0,
+    };
+  }, [metrics]);
+
+  // DEX distribution data for pie chart
+  const dexDistributionData = useMemo(() => {
+    if (!metrics?.dex_distribution) {
+      // Generate mock distribution from recent executions if not available
+      const mockDexes: Record<string, number> = {};
+      metrics?.recent_executions?.forEach(exec => {
+        if (exec.dex_distribution) {
+          Object.entries(exec.dex_distribution).forEach(([dex, amount]) => {
+            mockDexes[dex] = (mockDexes[dex] || 0) + amount;
+          });
+        }
+      });
+      if (Object.keys(mockDexes).length === 0) {
+        return [
+          { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
+          { name: 'CronaSwap', value: 30, color: 'hsl(var(--secondary))', volume: 0 },
+          { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
+        ];
+      }
+      const total = Object.values(mockDexes).reduce((a, b) => a + b, 0);
+      return Object.entries(mockDexes).map(([name, value]) => ({
+        name,
+        value: (value / total) * 100,
+        volume: value,
+        color: name.includes('VVS') ? 'hsl(var(--primary))' : name.includes('Crona') ? 'hsl(var(--secondary))' : 'hsl(var(--accent))',
+      }));
+    }
+    
+    return Object.entries(metrics.dex_distribution).map(([dex, data]) => ({
+      name: dex,
+      value: data.percentage,
+      volume: data.volume,
+      count: data.count,
+      color: dex.includes('VVS') ? 'hsl(var(--primary))' : dex.includes('Crona') ? 'hsl(var(--secondary))' : 'hsl(var(--accent))',
+    }));
+  }, [metrics]);
+
   // Export metrics as JSON
   const handleExport = useCallback(() => {
     if (!metrics) return;
@@ -207,6 +287,40 @@ export default function Dashboard() {
     const link = document.createElement('a');
     link.href = url;
     link.download = `dashboard-metrics-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [metrics]);
+
+  // Export financial data as CSV
+  const handleExportCSV = useCallback(() => {
+    if (!metrics?.recent_executions || metrics.recent_executions.length === 0) return;
+    
+    const headers = ['Date', 'Token In', 'Token Out', 'Amount In', 'Amount Out', 'Savings %', 'Gas Cost (USD)', 'Protocol Fee (USD)', 'Profit (USD)', 'Status'];
+    const rows = metrics.recent_executions.map(exec => [
+      new Date(exec.timestamp * 1000).toLocaleString(),
+      exec.token_in,
+      exec.token_out,
+      exec.amount_in.toLocaleString(),
+      exec.amount_out.toLocaleString(),
+      exec.savings_pct.toFixed(2),
+      (exec.gas_cost_usd || 0).toFixed(2),
+      (exec.protocol_fee_usd || 0).toFixed(2),
+      (exec.profit_usd || 0).toFixed(2),
+      exec.status,
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `financial-report-${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -235,6 +349,9 @@ export default function Dashboard() {
       volume: entry.volume,
       executions: entry.executions,
       savings: entry.savings,
+      profit: entry.profit,
+      costs: entry.costs,
+      netProfit: entry.profit - entry.costs,
       index: idx
     }));
   }, [metricsHistory]);
@@ -251,6 +368,18 @@ export default function Dashboard() {
     savings: {
       label: 'Avg Savings %',
       color: 'hsl(var(--accent))',
+    },
+    profit: {
+      label: 'Profit (USD)',
+      color: 'hsl(142, 76%, 36%)',
+    },
+    costs: {
+      label: 'Costs (USD)',
+      color: 'hsl(0, 84%, 60%)',
+    },
+    netProfit: {
+      label: 'Net Profit (USD)',
+      color: 'hsl(142, 76%, 36%)',
     },
   }), []);
 
@@ -294,22 +423,40 @@ export default function Dashboard() {
               Refresh
             </Button>
             {metrics && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleExport}
-                    className="gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Export
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Export metrics as JSON</p>
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportCSV}
+                      className="gap-2"
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                      CSV
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Export financial data as CSV</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExport}
+                      className="gap-2"
+                    >
+                      <Download className="h-4 w-4" />
+                      JSON
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Export metrics as JSON</p>
+                  </TooltipContent>
+                </Tooltip>
+              </>
             )}
           </div>
         </motion.div>
@@ -391,6 +538,13 @@ export default function Dashboard() {
         </Alert>
       ) : (
         <>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="financials">Financials</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {/* Cronos Network Status Card */}
             {isBlockchainConnected && blockchainData && (
@@ -826,6 +980,389 @@ export default function Dashboard() {
               </Card>
             </motion.div>
           </div>
+          </TabsContent>
+
+          <TabsContent value="financials" className="space-y-6">
+            {/* Financial Summary Cards */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <Card className="border-border/50 hover:border-green-500/30 transition-all duration-300">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      Net Profit
+                      <Info className="h-3 w-3 opacity-50" />
+                    </CardTitle>
+                    <div className="p-2 rounded-lg bg-green-500/10">
+                      <DollarSign className="h-4 w-4 text-green-500" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className={`text-3xl font-bold mb-1 ${financialMetrics.netProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {financialMetrics.netProfit >= 0 ? '+' : ''}{formatCurrency(financialMetrics.netProfit)}
+                    </div>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      {financialMetrics.netProfit >= 0 ? <ArrowUpRight className="h-3 w-3 text-green-500" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
+                      Total after costs
+                    </p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <Card className="border-border/50 hover:border-blue-500/30 transition-all duration-300">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      ROI
+                      <Info className="h-3 w-3 opacity-50" />
+                    </CardTitle>
+                    <div className="p-2 rounded-lg bg-blue-500/10">
+                      <TrendingUp className="h-4 w-4 text-blue-500" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className={`text-3xl font-bold mb-1 ${financialMetrics.roi >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {financialMetrics.roi >= 0 ? '+' : ''}{financialMetrics.roi.toFixed(2)}%
+                    </div>
+                    <p className="text-xs text-muted-foreground">Return on volume</p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <Card className="border-border/50 hover:border-orange-500/30 transition-all duration-300">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      Total Costs
+                      <Info className="h-3 w-3 opacity-50" />
+                    </CardTitle>
+                    <div className="p-2 rounded-lg bg-orange-500/10">
+                      <Wallet className="h-4 w-4 text-orange-500" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold mb-1 text-orange-500">
+                      {formatCurrency(financialMetrics.totalCosts)}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Gas: {formatCurrency(financialMetrics.totalGas)} | Fees: {formatCurrency(financialMetrics.totalFees)}
+                    </p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+              >
+                <Card className="border-border/50 hover:border-purple-500/30 transition-all duration-300">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                      Avg Profit/Trade
+                      <Info className="h-3 w-3 opacity-50" />
+                    </CardTitle>
+                    <div className="p-2 rounded-lg bg-purple-500/10">
+                      <BarChart3 className="h-4 w-4 text-purple-500" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className={`text-3xl font-bold mb-1 ${financialMetrics.avgProfitPerExecution >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {financialMetrics.avgProfitPerExecution >= 0 ? '+' : ''}{formatCurrency(financialMetrics.avgProfitPerExecution)}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Per execution</p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Financial Charts Row */}
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Profit vs Costs Chart */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 }}
+              >
+                <Card className="border-border/50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-green-500" />
+                      Profit & Costs Trend
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                      <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="hsl(142, 76%, 36%)" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="hsl(142, 76%, 36%)" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorCosts" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" opacity={0.3} />
+                        <XAxis 
+                          dataKey="time" 
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                          tickLine={{ stroke: 'hsl(var(--muted-foreground))' }}
+                        />
+                        <YAxis 
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                          tickLine={{ stroke: 'hsl(var(--muted-foreground))' }}
+                        />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Area
+                          type="monotone"
+                          dataKey="profit"
+                          stroke="hsl(142, 76%, 36%)"
+                          fill="url(#colorProfit)"
+                          strokeWidth={2}
+                          name="Profit (USD)"
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="costs"
+                          stroke="hsl(0, 84%, 60%)"
+                          fill="url(#colorCosts)"
+                          strokeWidth={2}
+                          name="Costs (USD)"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="netProfit"
+                          stroke="hsl(142, 76%, 46%)"
+                          strokeWidth={2}
+                          dot={false}
+                          name="Net Profit (USD)"
+                        />
+                      </AreaChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              {/* DEX Distribution Pie Chart */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.6 }}
+              >
+                <Card className="border-border/50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <PieChart className="h-5 w-5 text-secondary" />
+                      DEX Volume Distribution
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RechartsPieChart>
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Pie 
+                            data={dexDistributionData} 
+                            cx="50%" 
+                            cy="50%" 
+                            outerRadius={80} 
+                            dataKey="value" 
+                            label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
+                          >
+                            {dexDistributionData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                    <div className="mt-4 space-y-2">
+                      {dexDistributionData.map((dex, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: dex.color }} />
+                            <span className="text-muted-foreground">{dex.name}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-medium">{dex.value.toFixed(1)}%</span>
+                            {dex.volume && (
+                              <span className="text-xs text-muted-foreground ml-2">({formatCurrency(dex.volume)})</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Cost Breakdown */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-primary" />
+                    Cost Breakdown
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/30">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-blue-500/10">
+                          <Zap className="h-4 w-4 text-blue-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">Gas Costs</p>
+                          <p className="text-xs text-muted-foreground">Transaction fees</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold">{formatCurrency(financialMetrics.totalGas)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {metrics?.total_executions ? `$${(financialMetrics.totalGas / metrics.total_executions).toFixed(2)} per execution` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/30">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-purple-500/10">
+                          <DollarSign className="h-4 w-4 text-purple-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">Protocol Fees</p>
+                          <p className="text-xs text-muted-foreground">Service charges</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold">{formatCurrency(financialMetrics.totalFees)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {metrics?.total_volume_usd ? `${((financialMetrics.totalFees / metrics.total_volume_usd) * 100).toFixed(3)}% of volume` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-green-500/20">
+                          <TrendingUp className="h-4 w-4 text-green-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-green-500">Total Costs</p>
+                          <p className="text-xs text-muted-foreground">Gas + Fees</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-green-500">{formatCurrency(financialMetrics.totalCosts)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {metrics?.total_executions ? `$${(financialMetrics.avgCostPerExecution).toFixed(2)} avg per execution` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Financial Executions Table */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-primary" />
+                    Recent Executions (Financial Details)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {metrics?.recent_executions && metrics.recent_executions.length > 0 ? (
+                    <div className="space-y-3">
+                      <AnimatePresence>
+                        {metrics.recent_executions.slice(0, 10).map((exec, idx) => {
+                          const gasCost = exec.gas_cost_usd || 0;
+                          const protocolFee = exec.protocol_fee_usd || 0;
+                          const profit = exec.profit_usd || 0;
+                          const netProfit = profit - gasCost - protocolFee;
+                          return (
+                            <motion.div
+                              key={exec.id}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, x: 10 }}
+                              transition={{ delay: idx * 0.05 }}
+                              className="p-4 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all"
+                            >
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium flex items-center gap-2 mb-1">
+                                    <span>{exec.amount_in.toLocaleString()} {exec.token_in}</span>
+                                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                    <span>{exec.token_out}</span>
+                                  </p>
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {new Date(exec.timestamp * 1000).toLocaleString()}
+                                  </p>
+                                </div>
+                                <Badge variant="outline" className={`${netProfit >= 0 ? 'border-green-500/30 text-green-500' : 'border-red-500/30 text-red-500'}`}>
+                                  {netProfit >= 0 ? '+' : ''}{formatCurrency(netProfit)}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-4 gap-2 text-xs">
+                                <div>
+                                  <p className="text-muted-foreground">Gas</p>
+                                  <p className="font-medium">-{formatCurrency(gasCost)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-muted-foreground">Fee</p>
+                                  <p className="font-medium">-{formatCurrency(protocolFee)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-muted-foreground">Profit</p>
+                                  <p className="font-medium text-green-500">+{formatCurrency(profit)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-muted-foreground">Savings</p>
+                                  <p className="font-medium text-green-500">+{exec.savings_pct.toFixed(2)}%</p>
+                                </div>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Activity className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">No recent executions to display.</p>
+                      <p className="text-xs text-muted-foreground/70 mt-1">Start trading to see your execution history</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+        </Tabs>
         </>
       )}
       </div>
