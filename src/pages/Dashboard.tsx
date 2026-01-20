@@ -127,28 +127,28 @@ export default function Dashboard() {
             !isNaN(data.total_volume_usd) &&
             !isNaN(data.total_executions) &&
             !isNaN(data.avg_savings_pct)) {
-          setMetricsHistory(prev => {
+        setMetricsHistory(prev => {
             try {
               const financialSummary = data?.financial_summary || {};
-              const newEntry = {
-                timestamp: Date.now(),
-                volume: data.total_volume_usd || 0,
-                executions: data.total_executions || 0,
-                savings: data.avg_savings_pct || 0,
+          const newEntry = {
+            timestamp: Date.now(),
+            volume: data.total_volume_usd || 0,
+            executions: data.total_executions || 0,
+            savings: data.avg_savings_pct || 0,
                 profit: typeof financialSummary.total_profit_usd === 'number' && !isNaN(financialSummary.total_profit_usd) 
                   ? financialSummary.total_profit_usd 
                   : 0,
                 costs: typeof financialSummary.total_costs_usd === 'number' && !isNaN(financialSummary.total_costs_usd)
                   ? financialSummary.total_costs_usd
                   : 0
-              };
-              const updated = [...prev, newEntry].slice(-24);
-              return updated;
+          };
+          const updated = [...prev, newEntry].slice(-24);
+          return updated;
             } catch (historyErr) {
               console.error('Error updating metrics history:', historyErr);
               return prev;
             }
-          });
+        });
         }
       } catch (historyErr) {
         console.error('Error processing metrics history:', historyErr);
@@ -209,7 +209,7 @@ export default function Dashboard() {
       
       const handleOpen = () => {
         try {
-          setWsConnected(true);
+        setWsConnected(true);
         } catch (err) {
           console.error('Error handling WebSocket open:', err);
         }
@@ -235,7 +235,7 @@ export default function Dashboard() {
             return;
           }
 
-          if (message.type === 'metrics_update' && message.data) {
+        if (message.type === 'metrics_update' && message.data) {
             try {
               const data = message.data as DashboardMetrics;
               
@@ -246,8 +246,8 @@ export default function Dashboard() {
               }
 
               setMetrics(data);
-              setLastUpdate(new Date());
-              
+          setLastUpdate(new Date());
+          
               // Add to history with validation
               if (typeof data.total_volume_usd === 'number' && 
                   typeof data.total_executions === 'number' && 
@@ -255,22 +255,22 @@ export default function Dashboard() {
                   !isNaN(data.total_volume_usd) &&
                   !isNaN(data.total_executions) &&
                   !isNaN(data.avg_savings_pct)) {
-                setMetricsHistory(prev => {
+            setMetricsHistory(prev => {
                   try {
-                    const financialSummary = data.financial_summary || {};
-                    const newEntry = {
-                      timestamp: Date.now(),
-                      volume: data.total_volume_usd || 0,
-                      executions: data.total_executions || 0,
-                      savings: data.avg_savings_pct || 0,
+              const financialSummary = data.financial_summary || {};
+              const newEntry = {
+                timestamp: Date.now(),
+                volume: data.total_volume_usd || 0,
+                executions: data.total_executions || 0,
+                savings: data.avg_savings_pct || 0,
                       profit: typeof financialSummary.total_profit_usd === 'number' && !isNaN(financialSummary.total_profit_usd)
                         ? financialSummary.total_profit_usd
                         : 0,
                       costs: typeof financialSummary.total_costs_usd === 'number' && !isNaN(financialSummary.total_costs_usd)
                         ? financialSummary.total_costs_usd
                         : 0
-                    };
-                    return [...prev, newEntry].slice(-24);
+              };
+              return [...prev, newEntry].slice(-24);
                   } catch (historyErr) {
                     console.error('Error updating history from WebSocket:', historyErr);
                     return prev;
@@ -289,7 +289,7 @@ export default function Dashboard() {
       const handleStateChange = (state: { state: WebSocketState }) => {
         try {
           if (state && typeof state.state === 'number') {
-            setWsConnected(state.state === WebSocketState.CONNECTED);
+        setWsConnected(state.state === WebSocketState.CONNECTED);
           }
         } catch (err) {
           console.error('Error handling WebSocket state change:', err);
@@ -304,10 +304,10 @@ export default function Dashboard() {
 
       // Connect if not already connected
       try {
-        if (wsManager.getState() === WebSocketState.DISCONNECTED) {
-          wsManager.connect();
-        } else {
-          setWsConnected(wsManager.isConnected());
+      if (wsManager.getState() === WebSocketState.DISCONNECTED) {
+        wsManager.connect();
+      } else {
+        setWsConnected(wsManager.isConnected());
         }
       } catch (connectErr) {
         console.error('Error connecting WebSocket:', connectErr);
@@ -316,13 +316,13 @@ export default function Dashboard() {
 
       return () => {
         try {
-          if (wsManager) {
-            wsManager.off('open', handleOpen);
-            wsManager.off('close', handleClose);
+        if (wsManager) {
+          wsManager.off('open', handleOpen);
+          wsManager.off('close', handleClose);
             wsManager.off('error', handleError);
-            wsManager.off('message', handleMessage);
-            wsManager.off('statechange', handleStateChange);
-            // Don't disconnect, let it stay connected for other components
+          wsManager.off('message', handleMessage);
+          wsManager.off('statechange', handleStateChange);
+          // Don't disconnect, let it stay connected for other components
           }
         } catch (cleanupErr) {
           console.error('Error cleaning up WebSocket:', cleanupErr);
@@ -350,7 +350,7 @@ export default function Dashboard() {
   // Calculate financial metrics
   const financialMetrics = useMemo(() => {
     try {
-      const summary = metrics?.financial_summary || {};
+    const summary = metrics?.financial_summary || {};
       
       // Safely extract and validate numeric values
       const totalVolume = typeof metrics?.total_volume_usd === 'number' && !isNaN(metrics.total_volume_usd)
@@ -376,7 +376,7 @@ export default function Dashboard() {
         ? summary.total_profit_usd
         : 0;
       
-      const netProfit = totalProfit - totalCosts;
+    const netProfit = totalProfit - totalCosts;
       
       // Safe division with validation
       const roi = totalVolume > 0 && isFinite(totalVolume) && isFinite(netProfit)
@@ -391,12 +391,12 @@ export default function Dashboard() {
         ? (totalCosts / totalExecutions)
         : 0;
 
-      return {
-        totalProfit,
-        totalCosts,
-        totalGas,
-        totalFees,
-        netProfit,
+    return {
+      totalProfit,
+      totalCosts,
+      totalGas,
+      totalFees,
+      netProfit,
         roi: isFinite(roi) ? roi : 0,
         avgProfitPerExecution: isFinite(avgProfitPerExecution) ? avgProfitPerExecution : 0,
         avgCostPerExecution: isFinite(avgCostPerExecution) ? avgCostPerExecution : 0,
@@ -419,16 +419,24 @@ export default function Dashboard() {
 
   // DEX distribution data for pie chart
   const dexDistributionData = useMemo(() => {
+    try {
     if (!metrics?.dex_distribution) {
       // Generate mock distribution from recent executions if not available
       const mockDexes: Record<string, number> = {};
+        try {
       metrics?.recent_executions?.forEach(exec => {
-        if (exec.dex_distribution) {
+            if (exec && exec.dex_distribution && typeof exec.dex_distribution === 'object') {
           Object.entries(exec.dex_distribution).forEach(([dex, amount]) => {
-            mockDexes[dex] = (mockDexes[dex] || 0) + amount;
+                if (typeof amount === 'number' && !isNaN(amount) && isFinite(amount)) {
+                  mockDexes[dex] = (mockDexes[dex] || 0) + Math.max(0, amount);
+                }
           });
         }
       });
+        } catch (mockErr) {
+          console.error('Error generating mock DEX distribution:', mockErr);
+        }
+        
       if (Object.keys(mockDexes).length === 0) {
         return [
           { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
@@ -436,79 +444,316 @@ export default function Dashboard() {
           { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
         ];
       }
+        
+        try {
       const total = Object.values(mockDexes).reduce((a, b) => a + b, 0);
-      return Object.entries(mockDexes).map(([name, value]) => ({
-        name,
-        value: (value / total) * 100,
+          if (total <= 0 || !isFinite(total)) {
+            return [
+              { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
+              { name: 'CronaSwap', value: 30, color: 'hsl(var(--secondary))', volume: 0 },
+              { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
+            ];
+          }
+          
+          return Object.entries(mockDexes).map(([name, value]) => {
+            const percentage = (value / total) * 100;
+            return {
+              name: name || 'Unknown',
+              value: isFinite(percentage) ? percentage : 0,
         volume: value,
         color: name.includes('VVS') ? 'hsl(var(--primary))' : name.includes('Crona') ? 'hsl(var(--secondary))' : 'hsl(var(--accent))',
-      }));
-    }
-    
-    return Object.entries(metrics.dex_distribution).map(([dex, data]) => ({
-      name: dex,
-      value: data.percentage,
-      volume: data.volume,
-      count: data.count,
+            };
+          });
+        } catch (calcErr) {
+          console.error('Error calculating mock DEX distribution:', calcErr);
+          return [
+            { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
+            { name: 'CronaSwap', value: 30, color: 'hsl(var(--secondary))', volume: 0 },
+            { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
+          ];
+        }
+      }
+      
+      try {
+        return Object.entries(metrics.dex_distribution).map(([dex, data]) => {
+          const percentage = typeof data === 'object' && data !== null && typeof data.percentage === 'number'
+            ? (isFinite(data.percentage) ? Math.max(0, data.percentage) : 0)
+            : 0;
+          const volume = typeof data === 'object' && data !== null && typeof data.volume === 'number'
+            ? (isFinite(data.volume) ? Math.max(0, data.volume) : 0)
+            : 0;
+          
+          return {
+            name: dex || 'Unknown',
+            value: percentage,
+            volume,
+            count: typeof data === 'object' && data !== null && typeof data.count === 'number' ? data.count : 0,
       color: dex.includes('VVS') ? 'hsl(var(--primary))' : dex.includes('Crona') ? 'hsl(var(--secondary))' : 'hsl(var(--accent))',
-    }));
+          };
+        }).filter(item => item.value > 0 || item.volume > 0); // Filter out invalid entries
+      } catch (distributionErr) {
+        console.error('Error processing DEX distribution:', distributionErr);
+        return [
+          { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
+          { name: 'CronaSwap', value: 30, color: 'hsl(var(--secondary))', volume: 0 },
+          { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
+        ];
+      }
+    } catch (err) {
+      console.error('Error calculating DEX distribution data:', err);
+      return [
+        { name: 'VVS Finance', value: 45, color: 'hsl(var(--primary))', volume: 0 },
+        { name: 'CronaSwap', value: 30, color: 'hsl(var(--secondary))', volume: 0 },
+        { name: 'MM Finance', value: 25, color: 'hsl(var(--accent))', volume: 0 },
+      ];
+    }
   }, [metrics]);
 
   // Export metrics as JSON
   const handleExport = useCallback(() => {
-    if (!metrics) return;
-    const dataStr = JSON.stringify(metrics, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
+    try {
+      if (!metrics) {
+        console.warn('No metrics to export');
+        setError('No data available to export');
+        return;
+      }
+
+      let dataStr: string;
+      try {
+        dataStr = JSON.stringify(metrics, null, 2);
+      } catch (stringifyErr) {
+        console.error('Error stringifying metrics:', stringifyErr);
+        setError('Failed to format data for export');
+        return;
+      }
+
+      let dataBlob: Blob;
+      try {
+        dataBlob = new Blob([dataStr], { type: 'application/json' });
+      } catch (blobErr) {
+        console.error('Error creating blob:', blobErr);
+        setError('Failed to create export file');
+        return;
+      }
+
+      let url: string;
+      try {
+        url = URL.createObjectURL(dataBlob);
+      } catch (urlErr) {
+        console.error('Error creating object URL:', urlErr);
+        setError('Failed to generate download link');
+        return;
+      }
+
+      try {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `dashboard-metrics-${new Date().toISOString().split('T')[0]}.json`;
+        
+        try {
+          const dateStr = new Date().toISOString().split('T')[0];
+          link.download = `dashboard-metrics-${dateStr}.json`;
+        } catch (dateErr) {
+          console.warn('Error formatting date for filename:', dateErr);
+          link.download = `dashboard-metrics-${Date.now()}.json`;
+        }
+        
     document.body.appendChild(link);
     link.click();
+        
+        // Cleanup with error handling
+        setTimeout(() => {
+          try {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+          } catch (cleanupErr) {
+            console.error('Error cleaning up export:', cleanupErr);
+          }
+        }, 100);
+      } catch (downloadErr) {
+        console.error('Error triggering download:', downloadErr);
+        URL.revokeObjectURL(url);
+        setError('Failed to initiate download');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error during export';
+      console.error('Export error:', errorMessage, err);
+      setError(`Export failed: ${errorMessage}`);
+    }
   }, [metrics]);
 
   // Export financial data as CSV
   const handleExportCSV = useCallback(() => {
-    if (!metrics?.recent_executions || metrics.recent_executions.length === 0) return;
+    try {
+      if (!metrics?.recent_executions || !Array.isArray(metrics.recent_executions) || metrics.recent_executions.length === 0) {
+        console.warn('No execution data to export');
+        setError('No execution data available to export');
+        return;
+      }
     
     const headers = ['Date', 'Token In', 'Token Out', 'Amount In', 'Amount Out', 'Savings %', 'Gas Cost (USD)', 'Protocol Fee (USD)', 'Profit (USD)', 'Status'];
-    const rows = metrics.recent_executions.map(exec => [
-      new Date(exec.timestamp * 1000).toLocaleString(),
-      exec.token_in,
-      exec.token_out,
-      exec.amount_in.toLocaleString(),
-      exec.amount_out.toLocaleString(),
-      exec.savings_pct.toFixed(2),
-      (exec.gas_cost_usd || 0).toFixed(2),
-      (exec.protocol_fee_usd || 0).toFixed(2),
-      (exec.profit_usd || 0).toFixed(2),
-      exec.status,
-    ]);
+      
+      const rows = metrics.recent_executions.map((exec, index) => {
+        try {
+          // Validate execution data
+          if (!exec || typeof exec !== 'object') {
+            console.warn(`Invalid execution data at index ${index}`);
+            return null;
+          }
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+          // Safe date formatting
+          let dateStr: string;
+          try {
+            if (typeof exec.timestamp === 'number' && !isNaN(exec.timestamp) && isFinite(exec.timestamp)) {
+              const date = new Date(exec.timestamp * 1000);
+              if (!isNaN(date.getTime())) {
+                dateStr = date.toLocaleString();
+              } else {
+                dateStr = 'Invalid Date';
+              }
+            } else {
+              dateStr = 'Unknown';
+            }
+          } catch (dateErr) {
+            console.warn('Error formatting date:', dateErr);
+            dateStr = 'Unknown';
+          }
+
+          // Safe number formatting
+          const formatNumber = (value: any, decimals: number = 2): string => {
+            if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+              return value.toFixed(decimals);
+            }
+            return '0.00';
+          };
+
+          const formatLargeNumber = (value: any): string => {
+            if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+              return value.toLocaleString();
+            }
+            return '0';
+          };
+
+          return [
+            dateStr,
+            exec.token_in || 'Unknown',
+            exec.token_out || 'Unknown',
+            formatLargeNumber(exec.amount_in),
+            formatLargeNumber(exec.amount_out),
+            formatNumber(exec.savings_pct || 0),
+            formatNumber(exec.gas_cost_usd || 0),
+            formatNumber(exec.protocol_fee_usd || 0),
+            formatNumber(exec.profit_usd || 0),
+            exec.status || 'Unknown',
+          ];
+        } catch (rowErr) {
+          console.error(`Error processing execution at index ${index}:`, rowErr);
+          return null;
+        }
+      }).filter((row): row is string[] => row !== null); // Filter out null rows
+
+      if (rows.length === 0) {
+        setError('No valid execution data to export');
+        return;
+      }
+
+      // Escape CSV values and join
+      const escapeCSV = (value: string): string => {
+        if (typeof value !== 'string') {
+          value = String(value);
+        }
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      };
+
+      let csvContent: string;
+      try {
+        csvContent = [
+          headers.map(escapeCSV).join(','),
+          ...rows.map(row => row.map(escapeCSV).join(','))
     ].join('\n');
+      } catch (csvErr) {
+        console.error('Error generating CSV content:', csvErr);
+        setError('Failed to format CSV data');
+        return;
+      }
 
-    const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(dataBlob);
+      let dataBlob: Blob;
+      try {
+        dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      } catch (blobErr) {
+        console.error('Error creating CSV blob:', blobErr);
+        setError('Failed to create CSV file');
+        return;
+      }
+
+      let url: string;
+      try {
+        url = URL.createObjectURL(dataBlob);
+      } catch (urlErr) {
+        console.error('Error creating object URL:', urlErr);
+        setError('Failed to generate download link');
+        return;
+      }
+
+      try {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `financial-report-${new Date().toISOString().split('T')[0]}.csv`;
+        
+        try {
+          const dateStr = new Date().toISOString().split('T')[0];
+          link.download = `financial-report-${dateStr}.csv`;
+        } catch (dateErr) {
+          console.warn('Error formatting date for filename:', dateErr);
+          link.download = `financial-report-${Date.now()}.csv`;
+        }
+        
     document.body.appendChild(link);
     link.click();
+        
+        // Cleanup with error handling
+        setTimeout(() => {
+          try {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+          } catch (cleanupErr) {
+            console.error('Error cleaning up CSV export:', cleanupErr);
+          }
+        }, 100);
+      } catch (downloadErr) {
+        console.error('Error triggering CSV download:', downloadErr);
+        URL.revokeObjectURL(url);
+        setError('Failed to initiate download');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error during CSV export';
+      console.error('CSV export error:', errorMessage, err);
+      setError(`CSV export failed: ${errorMessage}`);
+    }
   }, [metrics]);
 
-  const formatCurrency = (value: number) => {
-    if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(2)}M`;
+  const formatCurrency = useCallback((value: number | undefined | null): string => {
+    try {
+      // Handle invalid inputs
+      if (value === null || value === undefined || typeof value !== 'number' || isNaN(value) || !isFinite(value)) {
+        return '$0.00';
+      }
+
+      // Handle negative values
+      const absValue = Math.abs(value);
+      const sign = value < 0 ? '-' : '';
+
+      if (absValue >= 1000000) {
+        return `${sign}$${(absValue / 1000000).toFixed(2)}M`;
+      }
+      return `${sign}$${absValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    } catch (err) {
+      console.error('Error formatting currency:', err);
+      return '$0.00';
     }
-    return `$${value.toLocaleString()}`;
-  };
+  }, []);
 
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -520,16 +765,74 @@ export default function Dashboard() {
   };
 
   const chartData = useMemo(() => {
-    return metricsHistory.map((entry, idx) => ({
-      time: new Date(entry.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-      volume: entry.volume,
-      executions: entry.executions,
-      savings: entry.savings,
-      profit: entry.profit,
-      costs: entry.costs,
-      netProfit: entry.profit - entry.costs,
+    try {
+      if (!Array.isArray(metricsHistory)) {
+        return [];
+      }
+
+      return metricsHistory
+        .map((entry, idx) => {
+          try {
+            if (!entry || typeof entry !== 'object') {
+              return null;
+            }
+
+            // Validate timestamp
+            const timestamp = typeof entry.timestamp === 'number' && !isNaN(entry.timestamp) && isFinite(entry.timestamp)
+              ? entry.timestamp
+              : Date.now();
+
+            let timeStr: string;
+            try {
+              const date = new Date(timestamp);
+              if (!isNaN(date.getTime())) {
+                timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+              } else {
+                timeStr = 'Invalid';
+              }
+            } catch (dateErr) {
+              console.warn('Error formatting chart time:', dateErr);
+              timeStr = 'Invalid';
+            }
+
+            // Validate numeric values
+            const volume = typeof entry.volume === 'number' && !isNaN(entry.volume) && isFinite(entry.volume)
+              ? Math.max(0, entry.volume)
+              : 0;
+            const executions = typeof entry.executions === 'number' && !isNaN(entry.executions) && isFinite(entry.executions)
+              ? Math.max(0, entry.executions)
+              : 0;
+            const savings = typeof entry.savings === 'number' && !isNaN(entry.savings) && isFinite(entry.savings)
+              ? entry.savings
+              : 0;
+            const profit = typeof entry.profit === 'number' && !isNaN(entry.profit) && isFinite(entry.profit)
+              ? entry.profit
+              : 0;
+            const costs = typeof entry.costs === 'number' && !isNaN(entry.costs) && isFinite(entry.costs)
+              ? Math.max(0, entry.costs)
+              : 0;
+            const netProfit = profit - costs;
+
+            return {
+              time: timeStr,
+              volume,
+              executions,
+              savings,
+              profit,
+              costs,
+              netProfit: isFinite(netProfit) ? netProfit : 0,
       index: idx
-    }));
+            };
+          } catch (entryErr) {
+            console.error(`Error processing chart entry at index ${idx}:`, entryErr);
+            return null;
+          }
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+    } catch (err) {
+      console.error('Error generating chart data:', err);
+      return [];
+    }
   }, [metricsHistory]);
 
   const chartConfig = useMemo(() => ({
@@ -745,28 +1048,69 @@ export default function Dashboard() {
                       </CardHeader>
                       <CardContent className="relative z-10">
                         <div className="text-2xl font-bold mb-1">
-                          Block #{blockchainData.currentBlock?.toLocaleString() || '0'}
+                          Block #{(() => {
+                            try {
+                              const block = blockchainData.currentBlock;
+                              if (typeof block === 'number' && !isNaN(block) && isFinite(block)) {
+                                return block.toLocaleString();
+                              }
+                              return '0';
+                            } catch {
+                              return '0';
+                            }
+                          })()}
                         </div>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          {blockchainData.blockTime ? (
+                          {(() => {
+                            try {
+                              const blockTime = blockchainData.blockTime;
+                              if (typeof blockTime === 'number' && !isNaN(blockTime) && isFinite(blockTime) && blockTime > 0) {
+                                return (
                             <>
                               <Clock className="h-3 w-3" />
-                              {blockchainData.blockTime.toFixed(1)}s avg
-                            </>
-                          ) : (
-                            <>{blockchainData.networkName}</>
-                          )}
+                                    {blockTime.toFixed(1)}s avg
+                                  </>
+                                );
+                              }
+                              return <>{blockchainData.networkName || 'Cronos'}</>;
+                            } catch {
+                              return <>{blockchainData.networkName || 'Cronos'}</>;
+                            }
+                          })()}
                         </p>
                       </CardContent>
                     </Card>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">
                     <p className="font-semibold mb-1">Cronos Blockchain</p>
-                    <p className="text-xs mb-1">Network: {blockchainData.networkName}</p>
-                    <p className="text-xs mb-1">Current Block: {blockchainData.currentBlock?.toLocaleString()}</p>
-                    {blockchainData.gasPriceGwei && (
-                      <p className="text-xs">Gas Price: {parseFloat(blockchainData.gasPriceGwei).toFixed(2)} Gwei</p>
-                    )}
+                    <p className="text-xs mb-1">Network: {blockchainData.networkName || 'Unknown'}</p>
+                    <p className="text-xs mb-1">
+                      Current Block: {(() => {
+                        try {
+                          const block = blockchainData.currentBlock;
+                          if (typeof block === 'number' && !isNaN(block) && isFinite(block)) {
+                            return block.toLocaleString();
+                          }
+                          return '0';
+                        } catch {
+                          return '0';
+                        }
+                      })()}
+                    </p>
+                    {(() => {
+                      try {
+                        const gasPrice = blockchainData.gasPriceGwei;
+                        if (gasPrice && typeof gasPrice === 'string') {
+                          const parsed = parseFloat(gasPrice);
+                          if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+                            return <p className="text-xs">Gas Price: {parsed.toFixed(2)} Gwei</p>;
+                          }
+                        }
+                        return null;
+                      } catch {
+                        return null;
+                      }
+                    })()}
                   </TooltipContent>
                 </Tooltip>
               </motion.div>
@@ -795,7 +1139,19 @@ export default function Dashboard() {
                       </CardHeader>
                       <CardContent className="relative z-10">
                         <div className="text-2xl font-bold mb-1">
-                          {parseFloat(formatUnits(balanceData.value, balanceData.decimals)).toFixed(4)} {balanceData.symbol}
+                          {(() => {
+                            try {
+                              if (balanceData && typeof balanceData.value === 'bigint' && typeof balanceData.decimals === 'number') {
+                                const formatted = parseFloat(formatUnits(balanceData.value, balanceData.decimals));
+                                if (!isNaN(formatted) && isFinite(formatted)) {
+                                  return `${formatted.toFixed(4)} ${balanceData.symbol || 'CRO'}`;
+                                }
+                              }
+                              return '0.0000 CRO';
+                            } catch {
+                              return '0.0000 CRO';
+                            }
+                          })()}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {blockchainData?.networkName || 'Cronos'}
@@ -869,7 +1225,17 @@ export default function Dashboard() {
                     </CardHeader>
                     <CardContent className="relative z-10">
                       <div className="text-3xl font-bold mb-1">
-                        {metrics?.total_executions?.toLocaleString() || '0'}
+                        {(() => {
+                          try {
+                            const executions = metrics?.total_executions;
+                            if (typeof executions === 'number' && !isNaN(executions) && isFinite(executions)) {
+                              return executions.toLocaleString();
+                            }
+                            return '0';
+                          } catch {
+                            return '0';
+                          }
+                        })()}
                       </div>
                       <p className="text-xs text-muted-foreground">Total successful swaps</p>
                     </CardContent>
@@ -903,7 +1269,17 @@ export default function Dashboard() {
                     </CardHeader>
                     <CardContent className="relative z-10">
                       <div className="text-3xl font-bold mb-1 text-green-500 flex items-center gap-2">
-                        {metrics?.avg_savings_pct?.toFixed(1) || '0.0'}%
+                        {(() => {
+                          try {
+                            const savings = metrics?.avg_savings_pct;
+                            if (typeof savings === 'number' && !isNaN(savings) && isFinite(savings)) {
+                              return `${savings.toFixed(1)}%`;
+                            }
+                            return '0.0%';
+                          } catch {
+                            return '0.0%';
+                          }
+                        })()}
                         <ArrowUpRight className="h-5 w-5" />
                       </div>
                       <p className="text-xs text-muted-foreground">vs single-DEX routing</p>
@@ -1081,21 +1457,53 @@ export default function Dashboard() {
                             </div>
                             <div>
                               <p className="text-sm font-medium flex items-center gap-2">
-                                <span>{exec.amount_in.toLocaleString()} {exec.token_in}</span>
+                                <span>
+                                  {(() => {
+                                    try {
+                                      const amount = typeof exec.amount_in === 'number' && !isNaN(exec.amount_in) && isFinite(exec.amount_in)
+                                        ? exec.amount_in.toLocaleString()
+                                        : '0';
+                                      return `${amount} ${exec.token_in || 'Unknown'}`;
+                                    } catch {
+                                      return `0 ${exec.token_in || 'Unknown'}`;
+                                    }
+                                  })()}
+                                </span>
                                 <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                <span>{exec.token_out}</span>
+                                <span>{exec.token_out || 'Unknown'}</span>
                               </p>
                               <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                                 <Clock className="h-3 w-3" />
-                                {new Date(exec.timestamp * 1000).toLocaleString()}
+                                {(() => {
+                                  try {
+                                    if (typeof exec.timestamp === 'number' && !isNaN(exec.timestamp) && isFinite(exec.timestamp)) {
+                                      const date = new Date(exec.timestamp * 1000);
+                                      if (!isNaN(date.getTime())) {
+                                        return date.toLocaleString();
+                                      }
+                                    }
+                                    return 'Invalid Date';
+                                  } catch {
+                                    return 'Invalid Date';
+                                  }
+                                })()}
                               </p>
                             </div>
                           </div>
                           <div className="text-right">
                             <Badge variant="outline" className="border-green-500/30 text-green-500 mb-1">
-                              +{exec.savings_pct.toFixed(2)}%
+                              +{(() => {
+                                try {
+                                  const savings = typeof exec.savings_pct === 'number' && !isNaN(exec.savings_pct) && isFinite(exec.savings_pct)
+                                    ? exec.savings_pct.toFixed(2)
+                                    : '0.00';
+                                  return `${savings}%`;
+                                } catch {
+                                  return '0.00%';
+                                }
+                              })()}
                             </Badge>
-                            <p className="text-xs text-muted-foreground capitalize">{exec.status}</p>
+                            <p className="text-xs text-muted-foreground capitalize">{exec.status || 'Unknown'}</p>
                           </div>
                         </motion.div>
                         ))}
@@ -1135,22 +1543,32 @@ export default function Dashboard() {
                         {metrics?.agent_status === 'active' ? 'Operational' : 'Offline'}
                       </Badge>
                     </div>
-                    {metrics?.success_rate !== undefined && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-muted-foreground">Success Rate</span>
-                          <span className="text-lg font-bold text-foreground">{metrics.success_rate.toFixed(1)}%</span>
-                        </div>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${metrics.success_rate}%` }}
-                            transition={{ delay: 0.6, duration: 0.8, ease: "easeOut" }}
-                            className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full"
-                          />
-                        </div>
-                      </div>
-                    )}
+                    {(() => {
+                      try {
+                        const successRate = metrics?.success_rate;
+                        if (typeof successRate === 'number' && !isNaN(successRate) && isFinite(successRate) && successRate >= 0 && successRate <= 100) {
+                          return (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-muted-foreground">Success Rate</span>
+                                <span className="text-lg font-bold text-foreground">{successRate.toFixed(1)}%</span>
+                              </div>
+                              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${Math.max(0, Math.min(100, successRate))}%` }}
+                                  transition={{ delay: 0.6, duration: 0.8, ease: "easeOut" }}
+                                  className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full"
+                                />
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      } catch {
+                        return null;
+                      }
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -1475,10 +1893,19 @@ export default function Dashboard() {
                     <div className="space-y-3">
                       <AnimatePresence>
                         {metrics.recent_executions.slice(0, 10).map((exec, idx) => {
-                          const gasCost = exec.gas_cost_usd || 0;
-                          const protocolFee = exec.protocol_fee_usd || 0;
-                          const profit = exec.profit_usd || 0;
-                          const netProfit = profit - gasCost - protocolFee;
+                          try {
+                            const gasCost = typeof exec.gas_cost_usd === 'number' && !isNaN(exec.gas_cost_usd) && isFinite(exec.gas_cost_usd)
+                              ? Math.max(0, exec.gas_cost_usd)
+                              : 0;
+                            const protocolFee = typeof exec.protocol_fee_usd === 'number' && !isNaN(exec.protocol_fee_usd) && isFinite(exec.protocol_fee_usd)
+                              ? Math.max(0, exec.protocol_fee_usd)
+                              : 0;
+                            const profit = typeof exec.profit_usd === 'number' && !isNaN(exec.profit_usd) && isFinite(exec.profit_usd)
+                              ? exec.profit_usd
+                              : 0;
+                            const netProfit = isFinite(profit - gasCost - protocolFee)
+                              ? profit - gasCost - protocolFee
+                              : 0;
                           return (
                             <motion.div
                               key={exec.id}
@@ -1491,13 +1918,36 @@ export default function Dashboard() {
                               <div className="flex items-start justify-between mb-3">
                                 <div className="flex-1">
                                   <p className="text-sm font-medium flex items-center gap-2 mb-1">
-                                    <span>{exec.amount_in.toLocaleString()} {exec.token_in}</span>
+                                    <span>
+                                      {(() => {
+                                        try {
+                                          const amount = typeof exec.amount_in === 'number' && !isNaN(exec.amount_in) && isFinite(exec.amount_in)
+                                            ? exec.amount_in.toLocaleString()
+                                            : '0';
+                                          return `${amount} ${exec.token_in || 'Unknown'}`;
+                                        } catch {
+                                          return `0 ${exec.token_in || 'Unknown'}`;
+                                        }
+                                      })()}
+                                    </span>
                                     <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                    <span>{exec.token_out}</span>
+                                    <span>{exec.token_out || 'Unknown'}</span>
                                   </p>
                                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                                     <Clock className="h-3 w-3" />
-                                    {new Date(exec.timestamp * 1000).toLocaleString()}
+                                {(() => {
+                                  try {
+                                    if (typeof exec.timestamp === 'number' && !isNaN(exec.timestamp) && isFinite(exec.timestamp)) {
+                                      const date = new Date(exec.timestamp * 1000);
+                                      if (!isNaN(date.getTime())) {
+                                        return date.toLocaleString();
+                                      }
+                                    }
+                                    return 'Invalid Date';
+                                  } catch {
+                                    return 'Invalid Date';
+                                  }
+                                })()}
                                   </p>
                                 </div>
                                 <Badge variant="outline" className={`${netProfit >= 0 ? 'border-green-500/30 text-green-500' : 'border-red-500/30 text-red-500'}`}>
@@ -1519,12 +1969,27 @@ export default function Dashboard() {
                                 </div>
                                 <div>
                                   <p className="text-muted-foreground">Savings</p>
-                                  <p className="font-medium text-green-500">+{exec.savings_pct.toFixed(2)}%</p>
+                                  <p className="font-medium text-green-500">
+                                    +{(() => {
+                                      try {
+                                        const savings = typeof exec.savings_pct === 'number' && !isNaN(exec.savings_pct) && isFinite(exec.savings_pct)
+                                          ? exec.savings_pct.toFixed(2)
+                                          : '0.00';
+                                        return `${savings}%`;
+                                      } catch {
+                                        return '0.00%';
+                                      }
+                                    })()}
+                                  </p>
                                 </div>
                               </div>
                             </motion.div>
                           );
-                        })}
+                          } catch (execErr) {
+                            console.error(`Error rendering execution at index ${idx}:`, execErr);
+                            return null;
+                          }
+                        }).filter(Boolean)}
                       </AnimatePresence>
                     </div>
                   ) : (
