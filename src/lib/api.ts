@@ -1197,6 +1197,53 @@ export async function executeProposal(
   );
 }
 
+/**
+ * Get Cronos blockchain data (block number, network status, etc.)
+ */
+export interface CronosBlockchainData {
+  current_block: number;
+  block_timestamp: number;
+  network_id: number;
+  chain_id: number;
+  network_name: string;
+  explorer_url: string;
+  native_currency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+  block_time?: number;
+  gas_price: string;
+  gas_price_gwei: string;
+}
+
+export async function getCronosBlockchainData(
+  options?: RequestOptions
+): Promise<CronosBlockchainData> {
+  try {
+    return await fetchWithRetry<CronosBlockchainData>(
+      `${API_BASE_URL}/api/cronos/blockchain`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+      {
+        ...options,
+        cache: options?.cache ?? true,
+        cacheTTL: options?.cacheTTL ?? 5000, // 5 seconds
+        retries: options?.retries ?? 1,
+        timeout: options?.timeout ?? 5000,
+      }
+    );
+  } catch (error: any) {
+    console.warn('Error fetching Cronos blockchain data, using fallback:', error.message);
+    // Return fallback data structure
+    throw error;
+  }
+}
+
 // Export API object for convenience
 export const api = {
   optimize: optimizeRoutes,
@@ -1222,6 +1269,8 @@ export const api = {
   voteOnProposal,
   finalizeProposal,
   executeProposal,
+  // Cronos Blockchain API
+  getCronosBlockchainData,
   clearCache,
   clearCachePattern,
 };

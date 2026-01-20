@@ -43,6 +43,7 @@ export default function Dashboard() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [metricsHistory, setMetricsHistory] = useState<Array<{ timestamp: number; volume: number; executions: number; savings: number }>>([]);
   const [usingMockData, setUsingMockData] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
 
   // Cronos blockchain data
   const { data: blockchainData, isConnected: isBlockchainConnected } = useCronosBlockchain({
@@ -116,6 +117,74 @@ export default function Dashboard() {
     const interval = setInterval(() => fetchMetrics(false), 30000);
     return () => clearInterval(interval);
   }, [fetchMetrics]);
+
+  // WebSocket connection for real-time updates
+  useEffect(() => {
+    let wsManager: ReturnType<typeof getDashboardMetricsWebSocket> | null = null;
+
+    try {
+      wsManager = getDashboardMetricsWebSocket();
+      
+      const handleOpen = () => {
+        setWsConnected(true);
+      };
+
+      const handleClose = () => {
+        setWsConnected(false);
+      };
+
+      const handleMessage = (message: any) => {
+        if (message.type === 'metrics_update' && message.data) {
+          setMetrics(message.data);
+          setLastUpdate(new Date());
+          
+          // Add to history
+          if (message.data.total_volume_usd !== undefined && 
+              message.data.total_executions !== undefined && 
+              message.data.avg_savings_pct !== undefined) {
+            setMetricsHistory(prev => {
+              const newEntry = {
+                timestamp: Date.now(),
+                volume: message.data.total_volume_usd || 0,
+                executions: message.data.total_executions || 0,
+                savings: message.data.avg_savings_pct || 0
+              };
+              return [...prev, newEntry].slice(-24);
+            });
+          }
+        }
+      };
+
+      const handleStateChange = (state: { state: WebSocketState }) => {
+        setWsConnected(state.state === WebSocketState.CONNECTED);
+      };
+
+      wsManager.on('open', handleOpen);
+      wsManager.on('close', handleClose);
+      wsManager.on('message', handleMessage);
+      wsManager.on('statechange', handleStateChange);
+
+      // Connect if not already connected
+      if (wsManager.getState() === WebSocketState.DISCONNECTED) {
+        wsManager.connect();
+      } else {
+        setWsConnected(wsManager.isConnected());
+      }
+
+      return () => {
+        if (wsManager) {
+          wsManager.off('open', handleOpen);
+          wsManager.off('close', handleClose);
+          wsManager.off('message', handleMessage);
+          wsManager.off('statechange', handleStateChange);
+          // Don't disconnect, let it stay connected for other components
+        }
+      };
+    } catch (error) {
+      console.warn('WebSocket not available:', error);
+      setWsConnected(false);
+    }
+  }, []);
 
   // Keyboard shortcut for refresh (R key)
   useEffect(() => {
@@ -199,16 +268,17 @@ export default function Dashboard() {
             <p className="text-muted-foreground text-lg">Cross-DEX Liquidity Execution Overview</p>
           </div>
           <div className="flex items-center gap-3">
+            <ConnectionStatus showLabel={false} size="sm" />
             {lastUpdate && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <div className={`h-2 w-2 rounded-full ${isRefreshing ? 'animate-pulse bg-primary' : 'bg-green-500'}`} />
+                    <div className={`h-2 w-2 rounded-full ${isRefreshing ? 'animate-pulse bg-primary' : wsConnected ? 'bg-green-500' : 'bg-blue-500'}`} />
                     <span>Last updated: {lastUpdate.toLocaleTimeString()}</span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Auto-refreshes every 30 seconds</p>
+                  <p>{wsConnected ? 'Real-time updates via WebSocket' : 'Auto-refreshes every 30 seconds'}</p>
                   <p className="text-xs mt-1">Press Ctrl+R / Cmd+R to refresh</p>
                 </TooltipContent>
               </Tooltip>
