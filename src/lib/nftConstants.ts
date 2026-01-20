@@ -27,3 +27,4 @@ export const NFT_COLLECTION_INFO = {
   defaultImage: '/placeholder.svg',
 } as const;
 
+

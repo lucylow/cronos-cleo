@@ -429,3 +429,4 @@ class FinancialMetricsCollector:
 # Global instance
 financial_metrics_collector = FinancialMetricsCollector()
 
+

@@ -12,3 +12,4 @@ export interface WalletConnectionInfo {
   nativeBalance: string | null;
 }
 
+

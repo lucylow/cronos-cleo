@@ -2794,23 +2794,15 @@ function ProposalPreviewCard({
     const dataArray = [...(data as readonly unknown[])] as unknown[];
     if (dataArray.length < 15) return null;
 
-    const [
-      ,
-      proposer,
-      startTime,
-      endTime,
-      forVotes,
-      againstVotes,
-      abstainVotes,
-      status,
-      ,
-      ,
-      ,
-      ,
-      ,
-      ,
-      description,
-    ] = dataArray as [bigint, string, bigint, bigint, bigint, bigint, bigint, number, number, string, bigint, string, string, string, string];
+    // Destructure only the fields we need, using array indices
+    const proposer = dataArray[1] as string;
+    const startTime = dataArray[2] as bigint;
+    const endTime = dataArray[3] as bigint;
+    const forVotes = dataArray[4] as bigint;
+    const againstVotes = dataArray[5] as bigint;
+    const abstainVotes = dataArray[6] as bigint;
+    const status = dataArray[7] as number;
+    const description = dataArray[13] as string;
 
     const statusNum = Number(status);
     const endTimestamp = Number(endTime) * 1000;
