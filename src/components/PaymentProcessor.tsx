@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
-import { Loader2, CheckCircle2, XCircle, Wallet, History, Zap, Copy, ExternalLink, Plus, X, Layers } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Wallet, History, Zap, Copy, ExternalLink, Plus, X, Layers, Search, Filter, Download, RefreshCw, AlertCircle, Clock, TrendingUp, DollarSign, BarChart3 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -92,7 +92,14 @@ interface PaymentHistory {
   amount: string;
   token: string;
   timestamp: number;
-  status: "success" | "failed";
+  status: "pending" | "processing" | "success" | "failed";
+  recipient?: string;
+  gasUsed?: string;
+  gasCost?: string;
+  blockNumber?: number;
+  confirmations?: number;
+  errorMessage?: string;
+  retryCount?: number;
 }
 
 interface PaymentTemplate {
@@ -145,6 +152,19 @@ export default function PaymentProcessor() {
   const [x402FacilitatorAddress, setX402FacilitatorAddress] = useState(getX402FacilitatorAddress());
   const [batchPayments, setBatchPayments] = useState<BatchPaymentItem[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
+  
+  // Enhanced payment features
+  const [historyFilter, setHistoryFilter] = useState<"all" | "pending" | "success" | "failed">("all");
+  const [historySearch, setHistorySearch] = useState("");
+  const [trackingPayments, setTrackingPayments] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  const [paymentStats, setPaymentStats] = useState({
+    total: 0,
+    success: 0,
+    failed: 0,
+    pending: 0,
+    totalAmount: 0,
+    totalGasCost: 0,
+  });
 
   useEffect(() => {
     // Auto-fetch token info when token address is entered
@@ -179,7 +199,16 @@ export default function PaymentProcessor() {
     const stored = localStorage.getItem("paymentHistory");
     if (stored) {
       try {
-        setPaymentHistory(JSON.parse(stored));
+        const history = JSON.parse(stored);
+        setPaymentHistory(history);
+        calculateStats(history);
+        
+        // Resume tracking pending payments
+        history.forEach((payment: PaymentHistory) => {
+          if (payment.status === "pending" || payment.status === "processing") {
+            trackPaymentStatus(payment.txHash, payment);
+          }
+        });
       } catch (e) {
         console.error("Failed to load payment history:", e);
       }
@@ -194,7 +223,101 @@ export default function PaymentProcessor() {
         console.error("Failed to load templates:", e);
       }
     }
+    
+    // Cleanup tracking intervals on unmount
+    return () => {
+      trackingPayments.forEach((interval) => clearInterval(interval));
+      trackingPayments.clear();
+    };
   }, []);
+  
+  // Calculate payment statistics
+  const calculateStats = (history: PaymentHistory[]) => {
+    const stats = {
+      total: history.length,
+      success: 0,
+      failed: 0,
+      pending: 0,
+      totalAmount: 0,
+      totalGasCost: 0,
+    };
+    
+    history.forEach((payment) => {
+      if (payment.status === "success") stats.success++;
+      else if (payment.status === "failed") stats.failed++;
+      else if (payment.status === "pending" || payment.status === "processing") stats.pending++;
+      
+      const amount = parseFloat(payment.amount) || 0;
+      stats.totalAmount += amount;
+      
+      if (payment.gasCost) {
+        stats.totalGasCost += parseFloat(payment.gasCost) || 0;
+      }
+    });
+    
+    setPaymentStats(stats);
+  };
+  
+  // Track payment transaction status
+  const trackPaymentStatus = async (txHash: string, payment: PaymentHistory) => {
+    if (!provider || trackingPayments.has(txHash)) return;
+    
+    const interval = setInterval(async () => {
+      try {
+        const receipt = await provider.getTransactionReceipt(txHash);
+        const tx = await provider.getTransaction(txHash);
+        
+        if (receipt) {
+          // Transaction confirmed
+          const gasUsed = receipt.gasUsed.toString();
+          const gasPrice = receipt.gasPrice?.toString() || "0";
+          const gasCostWei = BigInt(gasUsed) * BigInt(gasPrice);
+          const gasCost = ethers.formatEther(gasCostWei);
+          
+          const updatedPayment: PaymentHistory = {
+            ...payment,
+            status: receipt.status === 1 ? "success" : "failed",
+            gasUsed: ethers.formatUnits(gasUsed, 0),
+            gasCost,
+            blockNumber: receipt.blockNumber,
+            confirmations: await provider.getBlockNumber().then(bn => bn - receipt.blockNumber),
+            errorMessage: receipt.status === 0 ? "Transaction reverted" : undefined,
+          };
+          
+          updatePaymentInHistory(updatedPayment);
+          clearInterval(interval);
+          trackingPayments.delete(txHash);
+          
+          if (receipt.status === 1) {
+            toast.success(`Payment confirmed! Block #${receipt.blockNumber}`);
+          } else {
+            toast.error("Payment transaction failed");
+          }
+        } else if (tx && tx.blockNumber === null) {
+          // Still pending
+          updatePaymentInHistory({
+            ...payment,
+            status: "processing",
+          });
+        }
+      } catch (error) {
+        console.error("Error tracking payment:", error);
+      }
+    }, 5000); // Check every 5 seconds
+    
+    trackingPayments.set(txHash, interval);
+  };
+  
+  const updatePaymentInHistory = (updatedPayment: PaymentHistory) => {
+    setPaymentHistory((prev) => {
+      const updated = prev.map((p) =>
+        p.txHash === updatedPayment.txHash ? updatedPayment : p
+      );
+      localStorage.setItem("paymentHistory", JSON.stringify(updated));
+      calculateStats(updated);
+      return updated;
+    });
+  };
 
   useEffect(() => {
     // Fetch balances when account or signer changes
@@ -310,9 +433,123 @@ export default function PaymentProcessor() {
   };
 
   const addToHistory = (payment: PaymentHistory) => {
-    const newHistory = [payment, ...paymentHistory].slice(0, 50); // Keep last 50
+    const newHistory = [payment, ...paymentHistory].slice(0, 100); // Keep last 100
     setPaymentHistory(newHistory);
     localStorage.setItem("paymentHistory", JSON.stringify(newHistory));
+    calculateStats(newHistory);
+    
+    // Start tracking if pending/processing
+    if (payment.status === "pending" || payment.status === "processing") {
+      trackPaymentStatus(payment.txHash, payment);
+    }
+  };
+  
+  const retryPayment = async (payment: PaymentHistory) => {
+    if (!signer || !paymentContractAddress) {
+      toast.error("Connect wallet and set contract address");
+      return;
+    }
+    
+    setLoading(true);
+    setStatus(null);
+    
+    try {
+      await ensureCronosNetwork();
+      
+      const updatedPayment: PaymentHistory = {
+        ...payment,
+        status: "processing",
+        retryCount: (payment.retryCount || 0) + 1,
+        timestamp: Date.now(),
+      };
+      updatePaymentInHistory(updatedPayment);
+      
+      const paymentContract = new Contract(paymentContractAddress, PAYMENT_ABI, signer);
+      
+      if (payment.token === "CRO" || !payment.token.includes("0x")) {
+        // Native payment retry
+        const amountWei = ethers.parseUnits(payment.amount, 18);
+        const tx = await paymentContract.payNative({
+          value: amountWei,
+          gasLimit: 200_000,
+        });
+        
+        const newPayment: PaymentHistory = {
+          ...updatedPayment,
+          txHash: tx.hash,
+          status: "pending",
+        };
+        addToHistory(newPayment);
+        trackPaymentStatus(tx.hash, newPayment);
+        
+        toast.info(`Retry transaction sent: ${tx.hash.slice(0, 10)}...`);
+      } else {
+        // ERC20 payment retry (would need token address stored)
+        toast.error("ERC20 retry not yet implemented");
+      }
+    } catch (error: any) {
+      const errorMessage = error.message || "Retry failed";
+      toast.error(errorMessage);
+      updatePaymentInHistory({
+        ...payment,
+        status: "failed",
+        errorMessage,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const exportHistory = () => {
+    const filtered = getFilteredHistory();
+    const csv = [
+      ["Date", "Status", "Amount", "Token", "TX Hash", "Gas Cost", "Block", "Error"].join(","),
+      ...filtered.map((p) => {
+        const date = new Date(p.timestamp).toISOString();
+        return [
+          date,
+          p.status,
+          p.amount,
+          p.token,
+          p.txHash,
+          p.gasCost || "0",
+          p.blockNumber?.toString() || "",
+          p.errorMessage || "",
+        ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
+      }),
+    ].join("\n");
+    
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payment-history-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Payment history exported");
+  };
+  
+  const getFilteredHistory = () => {
+    let filtered = paymentHistory;
+    
+    // Filter by status
+    if (historyFilter !== "all") {
+      filtered = filtered.filter((p) => p.status === historyFilter);
+    }
+    
+    // Filter by search
+    if (historySearch) {
+      const search = historySearch.toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          p.txHash.toLowerCase().includes(search) ||
+          p.token.toLowerCase().includes(search) ||
+          p.amount.includes(search) ||
+          (p.recipient && p.recipient.toLowerCase().includes(search))
+      );
+    }
+    
+    return filtered;
   };
 
   const saveTemplate = () => {
@@ -412,6 +649,19 @@ export default function PaymentProcessor() {
       setTxHash(tx.hash);
       toast.info(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
 
+      // Add pending payment to history immediately
+      const pendingPayment: PaymentHistory = {
+        id: Date.now(),
+        txHash: tx.hash,
+        amount,
+        token: "CRO",
+        timestamp: Date.now(),
+        status: "pending",
+        recipient: paymentContractAddress,
+      };
+      addToHistory(pendingPayment);
+      trackPaymentStatus(tx.hash, pendingPayment);
+
       const receipt = await tx.wait();
       console.log("Payment receipt:", receipt);
 
@@ -428,6 +678,11 @@ export default function PaymentProcessor() {
 
       if (event) {
         const id = Number(event.args.paymentId);
+        const gasUsed = receipt.gasUsed.toString();
+        const gasPrice = receipt.gasPrice?.toString() || "0";
+        const gasCostWei = BigInt(gasUsed) * BigInt(gasPrice);
+        const gasCost = ethers.formatEther(gasCostWei);
+        
         setPaymentId(id);
         setStatus({
           type: "success",
@@ -436,14 +691,19 @@ export default function PaymentProcessor() {
         
         toast.success(`Payment successful! Payment ID: ${id}`);
 
-        // Add to history
-        addToHistory({
+        // Update history with confirmed payment
+        updatePaymentInHistory({
           id,
           txHash: tx.hash,
           amount,
           token: "CRO",
           timestamp: Date.now(),
           status: "success",
+          recipient: paymentContractAddress,
+          gasUsed: ethers.formatUnits(gasUsed, 0),
+          gasCost,
+          blockNumber: receipt.blockNumber,
+          confirmations: 1,
         });
 
         // Refresh balances
@@ -475,13 +735,25 @@ export default function PaymentProcessor() {
       
       // Add failed payment to history
       if (txHash) {
-        addToHistory({
-          id: paymentId || 0,
+        updatePaymentInHistory({
+          id: paymentId || Date.now(),
           txHash,
           amount,
           token: "CRO",
           timestamp: Date.now(),
           status: "failed",
+          errorMessage: errorMessage,
+        });
+      } else {
+        // Transaction never sent
+        addToHistory({
+          id: Date.now(),
+          txHash: "pending",
+          amount,
+          token: "CRO",
+          timestamp: Date.now(),
+          status: "failed",
+          errorMessage: errorMessage,
         });
       }
     } finally {
@@ -564,6 +836,19 @@ export default function PaymentProcessor() {
       setTxHash(tx.hash);
       toast.info(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
 
+      // Add pending payment to history immediately
+      const pendingPayment: PaymentHistory = {
+        id: Date.now(),
+        txHash: tx.hash,
+        amount,
+        token: tokenSymbol || "ERC20",
+        timestamp: Date.now(),
+        status: "pending",
+        recipient: paymentContractAddress,
+      };
+      addToHistory(pendingPayment);
+      trackPaymentStatus(tx.hash, pendingPayment);
+
       const receipt = await tx.wait();
       console.log("Payment receipt:", receipt);
 
@@ -580,6 +865,11 @@ export default function PaymentProcessor() {
 
       if (event) {
         const id = Number(event.args.paymentId);
+        const gasUsed = receipt.gasUsed.toString();
+        const gasPrice = receipt.gasPrice?.toString() || "0";
+        const gasCostWei = BigInt(gasUsed) * BigInt(gasPrice);
+        const gasCost = ethers.formatEther(gasCostWei);
+        
         setPaymentId(id);
         setStatus({
           type: "success",
@@ -588,14 +878,19 @@ export default function PaymentProcessor() {
         
         toast.success(`Payment successful! Payment ID: ${id}`);
 
-        // Add to history
-        addToHistory({
+        // Update history with confirmed payment
+        updatePaymentInHistory({
           id,
           txHash: tx.hash,
           amount,
           token: tokenSymbol || "ERC20",
           timestamp: Date.now(),
           status: "success",
+          recipient: paymentContractAddress,
+          gasUsed: ethers.formatUnits(gasUsed, 0),
+          gasCost,
+          blockNumber: receipt.blockNumber,
+          confirmations: 1,
         });
 
         // Refresh balances
@@ -628,13 +923,25 @@ export default function PaymentProcessor() {
       
       // Add failed payment to history
       if (txHash) {
-        addToHistory({
-          id: paymentId || 0,
+        updatePaymentInHistory({
+          id: paymentId || Date.now(),
           txHash,
           amount,
           token: tokenSymbol || "ERC20",
           timestamp: Date.now(),
           status: "failed",
+          errorMessage: errorMessage,
+        });
+      } else {
+        // Transaction never sent
+        addToHistory({
+          id: Date.now(),
+          txHash: "pending",
+          amount,
+          token: tokenSymbol || "ERC20",
+          timestamp: Date.now(),
+          status: "failed",
+          errorMessage: errorMessage,
         });
       }
     } finally {
@@ -1295,61 +1602,234 @@ export default function PaymentProcessor() {
         </CardContent>
       </Card>
 
+      {/* Payment Statistics */}
+      {paymentHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Payment Statistics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-3 bg-muted/30 rounded-lg">
+                <div className="text-2xl font-bold">{paymentStats.total}</div>
+                <div className="text-xs text-muted-foreground">Total Payments</div>
+              </div>
+              <div className="text-center p-3 bg-green-500/10 rounded-lg">
+                <div className="text-2xl font-bold text-green-500">{paymentStats.success}</div>
+                <div className="text-xs text-muted-foreground">Successful</div>
+              </div>
+              <div className="text-center p-3 bg-red-500/10 rounded-lg">
+                <div className="text-2xl font-bold text-red-500">{paymentStats.failed}</div>
+                <div className="text-xs text-muted-foreground">Failed</div>
+              </div>
+              <div className="text-center p-3 bg-blue-500/10 rounded-lg">
+                <div className="text-2xl font-bold text-blue-500">{paymentStats.pending}</div>
+                <div className="text-xs text-muted-foreground">Pending</div>
+              </div>
+              {paymentStats.totalAmount > 0 && (
+                <>
+                  <div className="text-center p-3 bg-muted/30 rounded-lg">
+                    <div className="text-lg font-bold flex items-center justify-center gap-1">
+                      <DollarSign className="h-4 w-4" />
+                      {paymentStats.totalAmount.toFixed(4)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total Amount</div>
+                  </div>
+                  <div className="text-center p-3 bg-muted/30 rounded-lg">
+                    <div className="text-lg font-bold flex items-center justify-center gap-1">
+                      <Zap className="h-4 w-4" />
+                      {paymentStats.totalGasCost.toFixed(6)} CRO
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total Gas Cost</div>
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Payment History */}
       {showHistory && paymentHistory.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Payment History</CardTitle>
-            <CardDescription>Recent payment transactions</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Payment History</CardTitle>
+                <CardDescription>Recent payment transactions</CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={exportHistory}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {paymentHistory.map((payment) => {
-                const explorerUrl = chainId === BigInt(25)
-                  ? `https://cronoscan.com/tx/${payment.txHash}`
-                  : `https://testnet.cronoscan.com/tx/${payment.txHash}`;
-                return (
-                  <div
-                    key={`${payment.id}-${payment.txHash}`}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors"
+            {/* Filters */}
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by TX hash, token, or amount..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    variant={historyFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("all")}
                   >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={payment.status === "success" ? "default" : "destructive"}>
-                          {payment.status}
-                        </Badge>
-                        <span className="text-sm font-medium">
-                          {payment.amount} {payment.token}
-                        </span>
+                    All
+                  </Button>
+                  <Button
+                    variant={historyFilter === "success" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("success")}
+                  >
+                    Success
+                  </Button>
+                  <Button
+                    variant={historyFilter === "failed" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("failed")}
+                  >
+                    Failed
+                  </Button>
+                  <Button
+                    variant={historyFilter === "pending" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setHistoryFilter("pending")}
+                  >
+                    Pending
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              {getFilteredHistory().length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No payments match your filters
+                </div>
+              ) : (
+                getFilteredHistory().map((payment) => {
+                  const explorerUrl = payment.txHash !== "pending" && chainId === BigInt(25)
+                    ? `https://cronoscan.com/tx/${payment.txHash}`
+                    : payment.txHash !== "pending"
+                    ? `https://testnet.cronoscan.com/tx/${payment.txHash}`
+                    : null;
+                  
+                  const statusColors = {
+                    success: "bg-green-500/20 text-green-500 border-green-500/30",
+                    failed: "bg-red-500/20 text-red-500 border-red-500/30",
+                    pending: "bg-yellow-500/20 text-yellow-500 border-yellow-500/30",
+                    processing: "bg-blue-500/20 text-blue-500 border-blue-500/30",
+                  };
+                  
+                  return (
+                    <div
+                      key={`${payment.id}-${payment.txHash}`}
+                      className="flex items-start justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
+                    >
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={statusColors[payment.status] || ""}>
+                            {payment.status === "processing" ? (
+                              <span className="flex items-center gap-1">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Processing
+                              </span>
+                            ) : (
+                              payment.status
+                            )}
+                          </Badge>
+                          <span className="text-sm font-medium">
+                            {payment.amount} {payment.token}
+                          </span>
+                          {payment.retryCount && payment.retryCount > 0 && (
+                            <Badge variant="outline" className="text-xs">
+                              Retry #{payment.retryCount}
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        {payment.txHash !== "pending" && (
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {payment.txHash.slice(0, 16)}...{payment.txHash.slice(-8)}
+                          </p>
+                        )}
+                        
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDistanceToNow(new Date(payment.timestamp), { addSuffix: true })}
+                          </span>
+                          {payment.blockNumber && (
+                            <span>Block #{payment.blockNumber}</span>
+                          )}
+                          {payment.gasCost && (
+                            <span>Gas: {parseFloat(payment.gasCost).toFixed(6)} CRO</span>
+                          )}
+                        </div>
+                        
+                        {payment.errorMessage && (
+                          <Alert variant="destructive" className="mt-2 py-2">
+                            <AlertCircle className="h-3 w-3" />
+                            <AlertDescription className="text-xs">
+                              {payment.errorMessage}
+                            </AlertDescription>
+                          </Alert>
+                        )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 font-mono">
-                        {payment.txHash.slice(0, 16)}...{payment.txHash.slice(-8)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(payment.timestamp), { addSuffix: true })}
-                      </p>
+                      
+                      <div className="flex gap-2 ml-4">
+                        {payment.status === "failed" && payment.token === "CRO" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => retryPayment(payment)}
+                            disabled={loading}
+                          >
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                            Retry
+                          </Button>
+                        )}
+                        {payment.txHash !== "pending" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyToClipboard(payment.txHash)}
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                            {explorerUrl && (
+                              <a
+                                href={explorerUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <Button variant="ghost" size="sm">
+                                  <ExternalLink className="h-3 w-3" />
+                                </Button>
+                              </a>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyToClipboard(payment.txHash)}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                      <a
-                        href={explorerUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <Button variant="ghost" size="sm">
-                          <ExternalLink className="h-3 w-3" />
-                        </Button>
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </CardContent>
         </Card>

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIModelOrchestrator:
-    """Orchestrates all AI models for C.L.E.O."""
+    """Enhanced orchestrator for all AI models with improved prediction aggregation and model selection"""
     
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
@@ -41,6 +41,17 @@ class AIModelOrchestrator:
         
         # Route optimization is stateful
         self.route_optimizer = None
+        
+        # Performance tracking
+        self.prediction_history = []
+        self.model_performance = {}
+        
+        # Confidence calibration
+        self.confidence_calibration = {}
+        
+        # Enable online learning by default
+        for model in self.models.values():
+            model.enable_online_learning(True)
     
     async def initialize(self):
         """Initialize all models"""
@@ -63,9 +74,41 @@ class AIModelOrchestrator:
         logger.info("AI Model Orchestrator initialized")
     
     async def analyze_trade(self, trade_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Run complete AI analysis for a trade"""
+        """Run complete AI analysis for a trade with enhanced financial context"""
         if not self.is_initialized:
             await self.initialize()
+        
+        # Enrich trade data with financial metrics if available
+        try:
+            from financial_metrics import financial_metrics_collector
+            financial_summary = financial_metrics_collector.get_financial_summary()
+            
+            # Add financial context to trade data for better predictions
+            trade_data['financial_context'] = {
+                'historical_roi': financial_summary.get('roi_pct', 0),
+                'sharpe_ratio': financial_summary.get('risk_metrics', {}).get('sharpe_ratio', 1.0),
+                'win_rate': financial_summary.get('risk_metrics', {}).get('win_rate', 0.5),
+                'avg_profit_per_execution': financial_summary.get('avg_profit_per_execution', 0),
+                'market_regime': financial_summary.get('economic_indicators', {}).get('market_regime', 'neutral'),
+                'network_congestion': financial_summary.get('economic_indicators', {}).get('network_congestion', 0.3),
+                'gas_price_avg': financial_summary.get('economic_indicators', {}).get('gas_price_avg_24h', 10.0),
+            }
+            
+            # Add market data for the token pair if available
+            token_pair = trade_data.get('token_pair', '')
+            if token_pair in financial_summary.get('market_data', {}):
+                market_data = financial_summary['market_data'][token_pair]
+                trade_data['market_context'] = {
+                    'price_change_24h': market_data.get('price_change_24h', 0),
+                    'volatility_24h': market_data.get('volatility_24h', 0),
+                    'volume_24h': market_data.get('volume_24h', 0),
+                    'liquidity_usd': market_data.get('liquidity_usd', 0),
+                }
+        except ImportError:
+            # Financial metrics not available, continue without enrichment
+            pass
+        except Exception as e:
+            logger.warning(f"Error enriching trade data with financial metrics: {e}")
         
         analysis_results = {
             "trade_id": trade_data.get('trade_id', 'unknown'),
@@ -391,29 +434,90 @@ class AIModelOrchestrator:
         return np.array(state[:20])
     
     def _calculate_overall_confidence(self, predictions: Dict[str, Any]) -> float:
-        """Calculate overall confidence score from all predictions"""
+        """Calculate overall confidence score with improved calibration"""
         confidence_scores = []
+        weights = {
+            'slippage': 0.25,
+            'risk': 0.30,
+            'success': 0.25,
+            'gas': 0.10,
+            'liquidity': 0.10
+        }
         
-        # Extract confidence from each prediction
+        # Extract confidence from each prediction with weights
+        weighted_sum = 0.0
+        total_weight = 0.0
+        
         for key, pred in predictions.items():
-            if isinstance(pred, dict):
+            if isinstance(pred, dict) and not pred.get('error'):
+                confidence = None
                 if 'confidence' in pred:
-                    confidence_scores.append(pred['confidence'])
+                    confidence = pred['confidence']
                 elif 'confidence_score' in pred:
-                    confidence_scores.append(pred['confidence_score'])
+                    confidence = pred['confidence_score']
+                
+                if confidence is not None:
+                    weight = weights.get(key, 0.1)
+                    # Apply calibration if available
+                    calibrated_confidence = self._calibrate_confidence(key, confidence)
+                    weighted_sum += calibrated_confidence * weight
+                    total_weight += weight
+                    confidence_scores.append(calibrated_confidence)
         
-        # If we have confidence scores, average them
-        if confidence_scores:
-            avg_confidence = np.mean(confidence_scores)
+        # Calculate weighted average
+        if total_weight > 0:
+            avg_confidence = weighted_sum / total_weight
             
-            # Penalize if any model has very low confidence
-            min_confidence = min(confidence_scores)
-            if min_confidence < 0.3:
-                avg_confidence *= 0.7
+            # Penalize if any model has very low confidence or high variance
+            if confidence_scores:
+                min_confidence = min(confidence_scores)
+                max_confidence = max(confidence_scores)
+                variance = np.var(confidence_scores)
+                
+                # Reduce confidence if models disagree significantly
+                if variance > 0.1:
+                    avg_confidence *= (1 - min(variance, 0.3))
+                
+                # Penalize if any model has very low confidence
+                if min_confidence < 0.3:
+                    avg_confidence *= 0.7
+            
+            # Ensure confidence is in valid range
+            avg_confidence = max(0.0, min(1.0, avg_confidence))
             
             return round(avg_confidence, 2)
         
         return 0.5  # Default confidence
+    
+    def _calibrate_confidence(self, model_name: str, raw_confidence: float) -> float:
+        """Calibrate confidence scores based on historical performance"""
+        # Simple calibration - in production, use Platt scaling or isotonic regression
+        if model_name not in self.confidence_calibration:
+            return raw_confidence
+        
+        calibration_data = self.confidence_calibration[model_name]
+        if len(calibration_data) < 10:
+            return raw_confidence
+        
+        # Apply linear calibration based on historical accuracy
+        # This is a simplified version - production would use more sophisticated methods
+        return raw_confidence
+    
+    def update_confidence_calibration(self, model_name: str, predicted_confidence: float, 
+                                     actual_accuracy: float):
+        """Update confidence calibration data"""
+        if model_name not in self.confidence_calibration:
+            self.confidence_calibration[model_name] = []
+        
+        self.confidence_calibration[model_name].append({
+            'predicted': predicted_confidence,
+            'actual': actual_accuracy,
+            'timestamp': datetime.now()
+        })
+        
+        # Keep only recent calibration data
+        if len(self.confidence_calibration[model_name]) > 1000:
+            self.confidence_calibration[model_name] = self.confidence_calibration[model_name][-1000:]
     
     async def train_all_models(self, training_data: Dict[str, Any]):
         """Train all models with provided data"""

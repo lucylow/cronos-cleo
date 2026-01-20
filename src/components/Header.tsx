@@ -16,18 +16,18 @@ export const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <header className="fixed top-0 w-full z-50 glass border-b border-border/30">
+    <header className="fixed top-0 w-full z-50 glass-strong border-b border-border/40 shadow-card">
       <div className="container mx-auto px-4 py-3">
         <nav className="flex justify-between items-center">
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3"
+            className="flex items-center gap-3 group cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
+            <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow group-hover:shadow-glow-primary group-hover:scale-110 transition-all duration-300">
               <Bot className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="font-display font-extrabold text-xl text-gradient-primary">
+            <span className="font-display font-extrabold text-xl text-gradient-primary group-hover:opacity-90 transition-opacity">
               C.L.E.O.
             </span>
           </motion.div>
@@ -61,7 +61,7 @@ export const Header = () => {
               </a>
             </Button>
             <ConnectWalletButton />
-            <Button asChild size="sm" className="bg-gradient-primary hover:shadow-glow transition-shadow">
+            <Button asChild size="sm" className="bg-gradient-primary hover:shadow-glow-primary transition-all duration-300 hover:scale-105">
               <Link to="/dashboard">
                 <Rocket className="w-4 h-4 mr-2" />
                 Launch App

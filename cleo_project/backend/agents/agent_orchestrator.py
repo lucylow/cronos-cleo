@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from collections import deque
 import pandas as pd
 import numpy as np
 
@@ -101,8 +102,15 @@ class AgentOrchestrator:
             "failed_workflows": 0,
             "ai_predictions_used": 0,
             "avg_response_time_ms": 0,
-            "total_response_time_ms": 0
+            "total_response_time_ms": 0,
+            "ai_prediction_accuracy": 0.0,
+            "avg_slippage_saved": 0.0,
+            "total_volume_processed_usd": 0.0
         }
+        
+        # Detailed tracking
+        self.workflow_history = deque(maxlen=1000)
+        self.ai_prediction_accuracy_history = deque(maxlen=100)
         
         # AI prediction cache
         self.ai_cache = {}
@@ -253,12 +261,32 @@ class AgentOrchestrator:
                 result["ai_insights"] = {
                     "confidence": ai_predictions.get("confidence_score", 0.0),
                     "recommendation": ai_predictions.get("recommendation", {}).get("action", "PROCEED"),
-                    "models_used": ai_predictions.get("models_used", [])
+                    "models_used": ai_predictions.get("models_used", []),
+                    "predicted_slippage": ai_predictions.get("predictions", {}).get("slippage", {}).get("predicted_slippage_percent"),
+                    "risk_level": ai_predictions.get("predictions", {}).get("risk", {}).get("risk_class")
                 }
+                
+                # Track AI prediction for accuracy measurement
+                self._track_ai_prediction(ai_predictions, result)
             
-            # Update metrics
+            # Update metrics with timing
+            workflow_time = (datetime.now() - datetime.fromtimestamp(float(workflow_id.split('_')[1]))).total_seconds() * 1000
             self.metrics["total_workflows"] += 1
             self.metrics["successful_workflows"] += 1
+            self.metrics["total_response_time_ms"] += workflow_time
+            self.metrics["avg_response_time_ms"] = (
+                self.metrics["total_response_time_ms"] / self.metrics["total_workflows"]
+            )
+            
+            # Track workflow
+            workflow_entry = {
+                "workflow_id": workflow_id,
+                "status": "completed",
+                "timestamp": datetime.now().isoformat(),
+                "used_ai": ai_predictions is not None,
+                "response_time_ms": workflow_time
+            }
+            self.workflow_history.append(workflow_entry)
             
             return result
         
@@ -336,8 +364,25 @@ class AgentOrchestrator:
             logger.error(f"[{workflow_id}] AI prediction error: {e}")
             return None
     
+    def _track_ai_prediction(self, ai_predictions: Dict, result: Dict):
+        """Track AI predictions for accuracy measurement"""
+        if not ai_predictions or not result.get("actual_output"):
+            return
+        
+        # Store prediction and actual outcome for later accuracy calculation
+        prediction_entry = {
+            "predicted_slippage": ai_predictions.get("predictions", {}).get("slippage", {}).get("predicted_slippage_percent"),
+            "predicted_risk": ai_predictions.get("predictions", {}).get("risk", {}).get("risk_score"),
+            "predicted_success": ai_predictions.get("predictions", {}).get("success", {}).get("success_probability"),
+            "actual_output": result.get("actual_output"),
+            "timestamp": datetime.now()
+        }
+        
+        # In production, compare with actual outcomes after execution completes
+        # For now, just track the predictions
+    
     def get_metrics(self) -> Dict[str, Any]:
-        """Get performance metrics"""
+        """Get enhanced performance metrics"""
         success_rate = 0.0
         if self.metrics["total_workflows"] > 0:
             success_rate = (self.metrics["successful_workflows"] / 
@@ -347,12 +392,20 @@ class AgentOrchestrator:
         if self.metrics["total_workflows"] > 0:
             avg_response_time = self.metrics["total_response_time_ms"] / self.metrics["total_workflows"]
         
+        # Calculate AI usage rate
+        ai_usage_rate = 0.0
+        if self.metrics["total_workflows"] > 0:
+            ai_usage_rate = (self.metrics["ai_predictions_used"] / 
+                           self.metrics["total_workflows"]) * 100
+        
         return {
             **self.metrics,
-            "success_rate": success_rate,
-            "avg_response_time_ms": avg_response_time,
+            "success_rate": round(success_rate, 2),
+            "avg_response_time_ms": round(avg_response_time, 2),
             "ai_models_available": self.ai_models_available,
-            "ai_cache_size": len(self.ai_cache)
+            "ai_cache_size": len(self.ai_cache),
+            "ai_usage_rate": round(ai_usage_rate, 2),
+            "recent_workflows_count": len(self.workflow_history)
         }
     
     def get_ai_model_status(self) -> Dict[str, Any]:

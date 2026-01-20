@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download, Network, Coins, DollarSign, TrendingDown, Wallet, BarChart3, FileSpreadsheet } from 'lucide-react';
+import { TrendingUp, Zap, PieChart, Activity, Loader2, AlertCircle, ArrowUpRight, ArrowDownRight, ArrowRight, Clock, RefreshCw, Info, Download, Network, Coins, DollarSign, TrendingDown, Wallet, BarChart3, FileSpreadsheet, Vote, Users, FileText, CheckCircle, XCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,16 @@ import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { getDashboardMetricsWebSocket, WebSocketState, WebSocketMessage } from '@/lib/websocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine } from 'recharts';
 import { CronosNetworkStatus } from '@/components/CronosNetworkStatus';
 import { useCronosBlockchain } from '@/hooks/useCronosBlockchain';
-import { useBalance, useAccount } from 'wagmi';
-import { formatUnits } from 'viem';
+import { useBalance, useAccount, useChainId, useReadContract } from 'wagmi';
+import { formatUnits, parseUnits } from 'viem';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Link } from 'react-router-dom';
+import { DAO_ABI } from '@/lib/daoAbi';
+import { DAO_ADDRESS_TESTNET, DAO_ADDRESS_MAINNET } from '@/lib/daoConstants';
+import { formatDistanceToNow, isValid } from 'date-fns';
 
 interface DashboardMetrics {
   total_volume_usd?: number;
@@ -43,8 +47,61 @@ interface DashboardMetrics {
     total_costs_usd?: number;
     total_gas_costs_usd?: number;
     total_protocol_fees_usd?: number;
+    total_revenue_usd?: number;
     roi_pct?: number;
     avg_profit_per_execution?: number;
+    avg_cost_per_execution?: number;
+    avg_volume_per_execution?: number;
+    returns_distribution?: {
+      mean?: number;
+      median?: number;
+      std?: number;
+      min?: number;
+      max?: number;
+      percentile_25?: number;
+      percentile_75?: number;
+    };
+    risk_metrics?: {
+      var_95_1d?: number;
+      var_99_1d?: number;
+      cvar_95_1d?: number;
+      max_drawdown?: number;
+      sharpe_ratio?: number;
+      sortino_ratio?: number;
+      calmar_ratio?: number;
+      win_rate?: number;
+      profit_factor?: number;
+      average_win?: number;
+      average_loss?: number;
+    };
+    market_data?: Record<string, {
+      current_price?: number;
+      price_change_24h?: number;
+      price_change_7d?: number;
+      volatility_24h?: number;
+      volume_24h?: number;
+      liquidity_usd?: number;
+    }>;
+    dex_financials?: Record<string, {
+      total_volume_24h?: number;
+      total_fees_24h?: number;
+      tvl_usd?: number;
+      price_impact_score?: number;
+    }>;
+    economic_indicators?: {
+      gas_price_gwei?: number;
+      network_congestion?: number;
+      total_value_locked_usd?: number;
+      market_regime?: string;
+    };
+    daily_trends?: Array<{
+      date: string;
+      volume: number;
+      profit: number;
+      costs: number;
+      executions: number;
+      success_rate: number;
+    }>;
   };
   dex_distribution?: Record<string, { volume: number; count: number; percentage: number }>;
 }
@@ -69,8 +126,69 @@ export default function Dashboard() {
 
   // User CRO balance
   const { address } = useAccount();
+  const chainId = useChainId();
   const { data: balanceData } = useBalance({
     address,
+  });
+
+  // DAO address based on chain
+  const daoAddress = useMemo(() => {
+    if (chainId === 25) return DAO_ADDRESS_MAINNET;
+    if (chainId === 338 || chainId === 1) return DAO_ADDRESS_TESTNET;
+    return DAO_ADDRESS_TESTNET;
+  }, [chainId]);
+
+  // DAO governance data
+  const { data: nextProposalId, isLoading: isLoadingProposals } = useReadContract({
+    address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
+    abi: DAO_ABI,
+    functionName: 'nextProposalId',
+    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+  });
+
+  const { data: quorumPercentage } = useReadContract({
+    address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
+    abi: DAO_ABI,
+    functionName: 'quorumPercentage',
+    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+  });
+
+  const { data: proposalThreshold } = useReadContract({
+    address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
+    abi: DAO_ABI,
+    functionName: 'proposalThreshold',
+    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+  });
+
+  const { data: votingPeriod } = useReadContract({
+    address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
+    abi: DAO_ABI,
+    functionName: 'votingPeriod',
+    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+  });
+
+  // Get governance token address and user balance
+  const { data: governanceTokenAddress } = useReadContract({
+    address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
+    abi: DAO_ABI,
+    functionName: 'governanceToken',
+    query: { enabled: !!daoAddress && daoAddress.startsWith('0x'), retry: 2 },
+  });
+
+  const { data: votingPower } = useReadContract({
+    address: governanceTokenAddress as `0x${string}` | undefined,
+    abi: [
+      {
+        type: 'function',
+        name: 'balanceOf',
+        stateMutability: 'view',
+        inputs: [{ name: 'account', type: 'address' }],
+        outputs: [{ name: '', type: 'uint256' }],
+      },
+    ],
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!governanceTokenAddress && !!address, retry: 2 },
   });
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
@@ -862,18 +980,109 @@ export default function Dashboard() {
     },
   }), []);
 
+  // Analytics data computation
+  const analyticsData = useMemo(() => {
+    try {
+      const summary = metrics?.financial_summary || {};
+      const returns = summary.returns_distribution || {};
+      const risk = summary.risk_metrics || {};
+      const dailyTrends = summary.daily_trends || [];
+      const dexFinancials = summary.dex_financials || {};
+      const marketData = summary.market_data || {};
+
+      // Returns distribution for visualization
+      const returnsDistribution = [
+        { label: 'Min', value: returns.min || 0, color: 'hsl(0, 84%, 60%)' },
+        { label: 'Q1 (25%)', value: returns.percentile_25 || 0, color: 'hsl(217, 91%, 60%)' },
+        { label: 'Median', value: returns.median || 0, color: 'hsl(142, 76%, 36%)' },
+        { label: 'Mean', value: returns.mean || 0, color: 'hsl(262, 83%, 58%)' },
+        { label: 'Q3 (75%)', value: returns.percentile_75 || 0, color: 'hsl(217, 91%, 60%)' },
+        { label: 'Max', value: returns.max || 0, color: 'hsl(0, 84%, 60%)' },
+      ].filter(item => item.value !== undefined && item.value !== null);
+
+      // Risk metrics for bar chart
+      const riskMetricsData = [
+        { name: 'Sharpe Ratio', value: risk.sharpe_ratio || 0, color: risk.sharpe_ratio && risk.sharpe_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+        { name: 'Sortino Ratio', value: risk.sortino_ratio || 0, color: risk.sortino_ratio && risk.sortino_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+        { name: 'Calmar Ratio', value: risk.calmar_ratio || 0, color: risk.calmar_ratio && risk.calmar_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+        { name: 'Profit Factor', value: risk.profit_factor || 0, color: risk.profit_factor && risk.profit_factor > 1 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+        { name: 'Win Rate', value: risk.win_rate ? risk.win_rate * 100 : 0, color: risk.win_rate && risk.win_rate > 0.5 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+        { name: 'Max Drawdown', value: risk.max_drawdown ? Math.abs(risk.max_drawdown) * 100 : 0, color: 'hsl(0, 84%, 60%)' },
+      ];
+
+      // DEX performance comparison
+      const dexPerformanceData = Object.entries(dexFinancials).map(([dex, data]) => ({
+        name: dex,
+        volume: data.total_volume_24h || 0,
+        fees: data.total_fees_24h || 0,
+        tvl: data.tvl_usd || 0,
+        priceImpact: data.price_impact_score || 0,
+      }));
+
+      // Daily trends chart data
+      const dailyTrendsData = dailyTrends.map(trend => ({
+        date: trend.date || '',
+        profit: trend.profit || 0,
+        costs: trend.costs || 0,
+        volume: trend.volume || 0,
+        executions: trend.executions || 0,
+        successRate: (trend.success_rate || 0) * 100,
+        netProfit: (trend.profit || 0) - (trend.costs || 0),
+      }));
+
+      // Market data summary
+      const marketDataArray = Object.entries(marketData).map(([token, data]) => ({
+        token,
+        price: data.current_price || 0,
+        priceChange24h: data.price_change_24h || 0,
+        priceChange7d: data.price_change_7d || 0,
+        volatility: data.volatility_24h || 0,
+        volume: data.volume_24h || 0,
+        liquidity: data.liquidity_usd || 0,
+      }));
+
+      return {
+        returnsDistribution,
+        riskMetricsData,
+        dexPerformanceData,
+        dailyTrendsData,
+        marketDataArray,
+        returns,
+        risk,
+      };
+    } catch (err) {
+      console.error('Error computing analytics data:', err);
+      return {
+        returnsDistribution: [],
+        riskMetricsData: [],
+        dexPerformanceData: [],
+        dailyTrendsData: [],
+        marketDataArray: [],
+        returns: {},
+        risk: {},
+      };
+    }
+  }, [metrics]);
+
   return (
     <TooltipProvider>
-      <div className="space-y-6">
+      <div className="space-y-6 relative">
+        {/* Decorative gradient orb */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl -z-10 opacity-50" />
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl -z-10 opacity-50" />
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6"
         >
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard</h1>
-            <p className="text-muted-foreground text-lg">Cross-DEX Liquidity Execution Overview</p>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-primary bg-clip-text text-transparent mb-2">
+              Dashboard
+            </h1>
+            <p className="text-muted-foreground text-lg flex items-center gap-2">
+              Cross-DEX Liquidity Execution Overview
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus showLabel={false} size="sm" />
@@ -1018,9 +1227,11 @@ export default function Dashboard() {
       ) : (
         <>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsList className="grid w-full max-w-lg grid-cols-4">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="financials">Financials</TabsTrigger>
+              <TabsTrigger value="analytics">Analytics</TabsTrigger>
+              <TabsTrigger value="governance">Governance</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
@@ -1175,23 +1386,24 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-primary/30 transition-all duration-300 group cursor-pointer">
-                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Card className="relative overflow-hidden border-border/50 hover:border-primary/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-primary">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                         Total Volume
                         <Info className="h-3 w-3 opacity-50" />
                       </CardTitle>
-                      <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                      <div className="p-2.5 rounded-xl bg-primary/15 group-hover:bg-primary/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/20">
                         <TrendingUp className="h-4 w-4 text-primary" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-primary via-primary/90 to-primary/70 bg-clip-text text-transparent">
                         {metrics?.total_volume_usd ? formatCurrency(metrics.total_volume_usd) : '$0'}
                       </div>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <ArrowUpRight className="h-3 w-3 text-green-500" />
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <ArrowUpRight className="h-3 w-3 text-green-500 animate-pulse" />
                         All-time volume
                       </p>
                     </CardContent>
@@ -1212,19 +1424,20 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-secondary/30 transition-all duration-300 group cursor-pointer">
-                    <div className="absolute inset-0 bg-gradient-to-br from-secondary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Card className="relative overflow-hidden border-border/50 hover:border-secondary/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-secondary">
+                    <div className="absolute inset-0 bg-gradient-to-br from-secondary/10 via-secondary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                         Executions
                         <Info className="h-3 w-3 opacity-50" />
                       </CardTitle>
-                      <div className="p-2 rounded-lg bg-secondary/10 group-hover:bg-secondary/20 transition-colors">
+                      <div className="p-2.5 rounded-xl bg-secondary/15 group-hover:bg-secondary/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-secondary/20">
                         <Zap className="h-4 w-4 text-secondary" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1">
+                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-secondary via-secondary/90 to-secondary/70 bg-clip-text text-transparent">
                         {(() => {
                           try {
                             const executions = metrics?.total_executions;
@@ -1237,7 +1450,10 @@ export default function Dashboard() {
                           }
                         })()}
                       </div>
-                      <p className="text-xs text-muted-foreground">Total successful swaps</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-secondary/60 animate-pulse" />
+                        Total successful swaps
+                      </p>
                     </CardContent>
                   </Card>
                 </TooltipTrigger>
@@ -1256,19 +1472,20 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 hover:border-accent/30 transition-all duration-300 group cursor-pointer">
-                    <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Card className="relative overflow-hidden border-border/50 hover:border-accent/40 transition-all duration-300 group cursor-pointer card-gradient hover:shadow-glow-accent">
+                    <div className="absolute inset-0 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-accent/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                         Avg Savings
                         <Info className="h-3 w-3 opacity-50" />
                       </CardTitle>
-                      <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                      <div className="p-2.5 rounded-xl bg-accent/15 group-hover:bg-accent/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-accent/20">
                         <PieChart className="h-4 w-4 text-accent" />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
-                      <div className="text-3xl font-bold mb-1 text-green-500 flex items-center gap-2">
+                      <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-green-500 via-green-400 to-green-500 bg-clip-text text-transparent flex items-center gap-2">
                         {(() => {
                           try {
                             const savings = metrics?.avg_savings_pct;
@@ -1280,9 +1497,12 @@ export default function Dashboard() {
                             return '0.0%';
                           }
                         })()}
-                        <ArrowUpRight className="h-5 w-5" />
+                        <ArrowUpRight className="h-5 w-5 text-green-500 animate-pulse" />
                       </div>
-                      <p className="text-xs text-muted-foreground">vs single-DEX routing</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500/60 animate-pulse" />
+                        vs single-DEX routing
+                      </p>
                     </CardContent>
                   </Card>
                 </TooltipTrigger>
@@ -1301,29 +1521,35 @@ export default function Dashboard() {
             >
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Card className="relative overflow-hidden border-border/50 transition-all duration-300 group cursor-pointer">
-                    <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity`} />
+                  <Card className={`relative overflow-hidden border-border/50 transition-all duration-300 group cursor-pointer card-gradient ${metrics?.agent_status === 'active' ? 'hover:border-green-500/40 hover:shadow-[0_0_50px_hsl(142_76%_36%_/_0.3)]' : ''}`}>
+                    <div className={`absolute inset-0 bg-gradient-to-br ${metrics?.agent_status === 'active' ? 'from-green-500/10 via-green-500/5' : 'from-muted/5'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                    <div className={`absolute top-0 right-0 w-32 h-32 ${metrics?.agent_status === 'active' ? 'bg-green-500/5' : 'bg-muted/5'} rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
                     <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                         Agent Status
                         <Info className="h-3 w-3 opacity-50" />
                       </CardTitle>
-                      <div className={`p-2 rounded-lg transition-colors ${metrics?.agent_status === 'active' ? 'bg-green-500/10 group-hover:bg-green-500/20' : 'bg-muted/20'}`}>
+                      <div className={`p-2.5 rounded-xl transition-all duration-300 group-hover:scale-110 ${metrics?.agent_status === 'active' ? 'bg-green-500/15 group-hover:bg-green-500/25 group-hover:shadow-lg group-hover:shadow-green-500/20' : 'bg-muted/20'}`}>
                         <Activity className={`h-4 w-4 ${metrics?.agent_status === 'active' ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
                       </div>
                     </CardHeader>
                     <CardContent className="relative z-10">
                       <div className="flex items-center gap-2 mb-1">
-                        <div className={`text-2xl font-bold ${metrics?.agent_status === 'active' ? 'text-green-500' : 'text-muted-foreground'}`}>
+                        <div className={`text-2xl font-bold bg-gradient-to-r ${metrics?.agent_status === 'active' ? 'from-green-500 via-green-400 to-green-500' : 'from-muted-foreground to-muted-foreground/70'} bg-clip-text text-transparent`}>
                           {metrics?.agent_status === 'active' ? 'Active' : 'Offline'}
                         </div>
                         {metrics?.agent_status === 'active' && (
-                          <Badge variant="outline" className="border-green-500/30 text-green-500 text-xs px-2 py-0">
+                          <Badge variant="outline" className="border-green-500/40 text-green-500 bg-green-500/10 text-xs px-2 py-0.5 animate-pulse">
                             Live
                           </Badge>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">AI routing status</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        {metrics?.agent_status === 'active' && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-green-500/60 animate-pulse" />
+                        )}
+                        AI routing status
+                      </p>
                     </CardContent>
                   </Card>
                 </TooltipTrigger>
@@ -1342,14 +1568,16 @@ export default function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5, duration: 0.4 }}
             >
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <div className="p-2 rounded-lg bg-primary/15">
+                      <TrendingUp className="h-5 w-5 text-primary" />
+                    </div>
                     Metrics Trends
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-4">
                   <ChartContainer config={chartConfig} className="h-[300px] w-full">
                     <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                       <defs>
@@ -1431,14 +1659,16 @@ export default function Dashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.4, duration: 0.4 }}
             >
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-primary" />
+              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <div className="p-2 rounded-lg bg-primary/15">
+                      <Activity className="h-5 w-5 text-primary" />
+                    </div>
                     Recent Executions
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-4">
                   {metrics?.recent_executions && metrics.recent_executions.length > 0 ? (
                     <div className="space-y-3">
                       <AnimatePresence>
@@ -1449,10 +1679,10 @@ export default function Dashboard() {
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 10 }}
                             transition={{ delay: 0.5 + idx * 0.05 }}
-                            className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all group"
+                            className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 border border-border/30 transition-all group hover:border-primary/30 hover:shadow-md"
                           >
                           <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                            <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-primary/20">
                               <Zap className="h-3.5 w-3.5 text-primary" />
                             </div>
                             <div>
@@ -1525,14 +1755,16 @@ export default function Dashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.4, duration: 0.4 }}
             >
-              <Card className="border-border/50">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2">
-                    <PieChart className="h-5 w-5 text-secondary" />
+              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <div className="p-2 rounded-lg bg-secondary/15">
+                      <PieChart className="h-5 w-5 text-secondary" />
+                    </div>
                     Agent Health
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-4">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
                       <span className="text-sm font-medium text-muted-foreground">Status</span>
@@ -1584,22 +1816,23 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
               >
-                <Card className="border-border/50 hover:border-green-500/30 transition-all duration-300">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Card className="border-border/50 hover:border-green-500/40 transition-all duration-300 card-gradient hover:shadow-[0_0_50px_hsl(142_76%_36%_/_0.3)] group">
+                  <div className="absolute inset-0 bg-gradient-to-br from-green-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                     <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                       Net Profit
                       <Info className="h-3 w-3 opacity-50" />
                     </CardTitle>
-                    <div className="p-2 rounded-lg bg-green-500/10">
+                    <div className="p-2.5 rounded-xl bg-green-500/15 group-hover:bg-green-500/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-green-500/20">
                       <DollarSign className="h-4 w-4 text-green-500" />
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className={`text-3xl font-bold mb-1 ${financialMetrics.netProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  <CardContent className="relative z-10">
+                    <div className={`text-3xl font-bold mb-1 bg-gradient-to-r ${financialMetrics.netProfit >= 0 ? 'from-green-500 via-green-400 to-green-500' : 'from-red-500 via-red-400 to-red-500'} bg-clip-text text-transparent`}>
                       {financialMetrics.netProfit >= 0 ? '+' : ''}{formatCurrency(financialMetrics.netProfit)}
                     </div>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      {financialMetrics.netProfit >= 0 ? <ArrowUpRight className="h-3 w-3 text-green-500" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      {financialMetrics.netProfit >= 0 ? <ArrowUpRight className="h-3 w-3 text-green-500 animate-pulse" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
                       Total after costs
                     </p>
                   </CardContent>
@@ -1635,18 +1868,19 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
               >
-                <Card className="border-border/50 hover:border-orange-500/30 transition-all duration-300">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Card className="border-border/50 hover:border-orange-500/40 transition-all duration-300 card-gradient hover:shadow-[0_0_50px_hsl(25_95%_53%_/_0.3)] group">
+                  <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                     <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                       Total Costs
                       <Info className="h-3 w-3 opacity-50" />
                     </CardTitle>
-                    <div className="p-2 rounded-lg bg-orange-500/10">
+                    <div className="p-2.5 rounded-xl bg-orange-500/15 group-hover:bg-orange-500/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-orange-500/20">
                       <Wallet className="h-4 w-4 text-orange-500" />
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold mb-1 text-orange-500">
+                  <CardContent className="relative z-10">
+                    <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-orange-500 via-orange-400 to-orange-500 bg-clip-text text-transparent">
                       {formatCurrency(financialMetrics.totalCosts)}
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -1661,21 +1895,25 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4 }}
               >
-                <Card className="border-border/50 hover:border-purple-500/30 transition-all duration-300">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Card className="border-border/50 hover:border-purple-500/40 transition-all duration-300 card-gradient hover:shadow-[0_0_50px_hsl(262_52%_52%_/_0.3)] group">
+                  <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
                     <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                       Avg Profit/Trade
                       <Info className="h-3 w-3 opacity-50" />
                     </CardTitle>
-                    <div className="p-2 rounded-lg bg-purple-500/10">
+                    <div className="p-2.5 rounded-xl bg-purple-500/15 group-hover:bg-purple-500/25 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-purple-500/20">
                       <BarChart3 className="h-4 w-4 text-purple-500" />
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className={`text-3xl font-bold mb-1 ${financialMetrics.avgProfitPerExecution >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  <CardContent className="relative z-10">
+                    <div className={`text-3xl font-bold mb-1 bg-gradient-to-r ${financialMetrics.avgProfitPerExecution >= 0 ? 'from-green-500 via-green-400 to-green-500' : 'from-red-500 via-red-400 to-red-500'} bg-clip-text text-transparent`}>
                       {financialMetrics.avgProfitPerExecution >= 0 ? '+' : ''}{formatCurrency(financialMetrics.avgProfitPerExecution)}
                     </div>
-                    <p className="text-xs text-muted-foreground">Per execution</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <div className={`w-1.5 h-1.5 rounded-full ${financialMetrics.avgProfitPerExecution >= 0 ? 'bg-green-500/60' : 'bg-red-500/60'} animate-pulse`} />
+                      Per execution
+                    </p>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -1689,14 +1927,16 @@ export default function Dashboard() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.5 }}
               >
-                <Card className="border-border/50">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2">
+              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <div className="p-2 rounded-lg bg-green-500/15">
                       <TrendingUp className="h-5 w-5 text-green-500" />
-                      Profit & Costs Trend
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+                    </div>
+                    Profit & Costs Trend
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
                     <ChartContainer config={chartConfig} className="h-[300px] w-full">
                       <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                         <defs>
@@ -1756,14 +1996,16 @@ export default function Dashboard() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.6 }}
               >
-                <Card className="border-border/50">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2">
+              <Card className="border-border/50 card-gradient hover:shadow-card-hover transition-all duration-300">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <div className="p-2 rounded-lg bg-secondary/15">
                       <PieChart className="h-5 w-5 text-secondary" />
-                      DEX Volume Distribution
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+                    </div>
+                    DEX Volume Distribution
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
                     <ChartContainer config={chartConfig} className="h-[300px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <RechartsPieChart>
@@ -1874,6 +2116,100 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             </motion.div>
+
+            {/* Risk Metrics & Market Indicators */}
+            {metrics?.financial_summary?.risk_metrics && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.75 }}
+                className="grid gap-4 md:grid-cols-2"
+              >
+                <Card className="border-border/50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5 text-primary" />
+                      Risk Metrics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {metrics.financial_summary.risk_metrics.sharpe_ratio !== undefined && (
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                          <span className="text-sm font-medium text-muted-foreground">Sharpe Ratio</span>
+                          <span className="text-lg font-bold">{metrics.financial_summary.risk_metrics.sharpe_ratio.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {metrics.financial_summary.risk_metrics.win_rate !== undefined && (
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                          <span className="text-sm font-medium text-muted-foreground">Win Rate</span>
+                          <span className="text-lg font-bold text-green-500">{(metrics.financial_summary.risk_metrics.win_rate * 100).toFixed(1)}%</span>
+                        </div>
+                      )}
+                      {metrics.financial_summary.risk_metrics.profit_factor !== undefined && (
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                          <span className="text-sm font-medium text-muted-foreground">Profit Factor</span>
+                          <span className="text-lg font-bold">{metrics.financial_summary.risk_metrics.profit_factor.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {metrics.financial_summary.risk_metrics.max_drawdown !== undefined && (
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                          <span className="text-sm font-medium text-muted-foreground">Max Drawdown</span>
+                          <span className="text-lg font-bold text-red-500">{(metrics.financial_summary.risk_metrics.max_drawdown * 100).toFixed(2)}%</span>
+                        </div>
+                      )}
+                      {metrics.financial_summary.risk_metrics.var_95_1d !== undefined && (
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                          <span className="text-sm font-medium text-muted-foreground">VaR (95%, 1d)</span>
+                          <span className="text-lg font-bold">{(metrics.financial_summary.risk_metrics.var_95_1d * 100).toFixed(2)}%</span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {metrics?.financial_summary?.economic_indicators && (
+                  <Card className="border-border/50">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5 text-secondary" />
+                        Market Indicators
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {metrics.financial_summary.economic_indicators.gas_price_gwei !== undefined && (
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                            <span className="text-sm font-medium text-muted-foreground">Gas Price</span>
+                            <span className="text-lg font-bold">{metrics.financial_summary.economic_indicators.gas_price_gwei.toFixed(2)} Gwei</span>
+                          </div>
+                        )}
+                        {metrics.financial_summary.economic_indicators.network_congestion !== undefined && (
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                            <span className="text-sm font-medium text-muted-foreground">Network Congestion</span>
+                            <span className="text-lg font-bold">{(metrics.financial_summary.economic_indicators.network_congestion * 100).toFixed(1)}%</span>
+                          </div>
+                        )}
+                        {metrics.financial_summary.economic_indicators.market_regime && (
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                            <span className="text-sm font-medium text-muted-foreground">Market Regime</span>
+                            <Badge variant="outline" className="capitalize">
+                              {metrics.financial_summary.economic_indicators.market_regime}
+                            </Badge>
+                          </div>
+                        )}
+                        {metrics.financial_summary.economic_indicators.total_value_locked_usd !== undefined && (
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                            <span className="text-sm font-medium text-muted-foreground">Total Value Locked</span>
+                            <span className="text-lg font-bold">{formatCurrency(metrics.financial_summary.economic_indicators.total_value_locked_usd)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </motion.div>
+            )}
 
             {/* Financial Executions Table */}
             <motion.div
@@ -2003,10 +2339,563 @@ export default function Dashboard() {
               </Card>
             </motion.div>
           </TabsContent>
+
+          <TabsContent value="governance" className="space-y-6">
+            {/* DAO Governance Overview */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {/* Voting Power Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 hover:border-primary/30 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Voting Power
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                          <Vote className="h-4 w-4 text-primary" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-3xl font-bold mb-1">
+                          {votingPower ? (() => {
+                            try {
+                              const power = parseFloat(formatUnits(votingPower as bigint, 18));
+                              return power.toLocaleString(undefined, { maximumFractionDigits: 2 });
+                            } catch {
+                              return '0';
+                            }
+                          })() : '0'}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {address ? 'Your governance tokens' : 'Connect wallet to see'}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Your Voting Power</p>
+                    <p className="text-xs">Number of governance tokens you hold. One token = one vote.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+
+              {/* Total Proposals Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 hover:border-secondary/30 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-secondary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Total Proposals
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-secondary/10 group-hover:bg-secondary/20 transition-colors">
+                          <FileText className="h-4 w-4 text-secondary" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-3xl font-bold mb-1">
+                          {isLoadingProposals ? (
+                            <Loader2 className="h-6 w-6 animate-spin" />
+                          ) : nextProposalId ? (
+                            (() => {
+                              try {
+                                const count = Number(nextProposalId);
+                                return isNaN(count) ? '0' : (count - 1).toString();
+                              } catch {
+                                return '0';
+                              }
+                            })()
+                          ) : '0'}
+                        </div>
+                        <p className="text-xs text-muted-foreground">All-time proposals</p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Total Proposals</p>
+                    <p className="text-xs">Total number of proposals created in the DAO.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+
+              {/* Quorum Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 hover:border-accent/30 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Quorum
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-accent/10 group-hover:bg-accent/20 transition-colors">
+                          <Users className="h-4 w-4 text-accent" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-3xl font-bold mb-1 text-green-500">
+                          {quorumPercentage ? (() => {
+                            try {
+                              return `${Number(quorumPercentage)}%`;
+                            } catch {
+                              return 'N/A';
+                            }
+                          })() : 'N/A'}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Minimum required</p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Quorum Percentage</p>
+                    <p className="text-xs">Minimum percentage of total supply that must vote for a proposal to pass.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+
+              {/* Voting Period Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Card className="relative overflow-hidden border-border/50 transition-all duration-300 group cursor-pointer">
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          Voting Period
+                          <Info className="h-3 w-3 opacity-50" />
+                        </CardTitle>
+                        <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                          <Clock className="h-4 w-4 text-primary" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="relative z-10">
+                        <div className="text-3xl font-bold mb-1">
+                          {votingPeriod ? (() => {
+                            try {
+                              const days = Math.floor(Number(votingPeriod) / (24 * 60 * 60));
+                              return `${days}d`;
+                            } catch {
+                              return 'N/A';
+                            }
+                          })() : 'N/A'}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Proposal duration</p>
+                      </CardContent>
+                    </Card>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-semibold mb-1">Voting Period</p>
+                    <p className="text-xs">Duration in days that proposals remain open for voting.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </motion.div>
+            </div>
+
+            {/* Quick Actions and DAO Info */}
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* DAO Parameters */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 }}
+              >
+                <Card className="border-border/50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5 text-primary" />
+                      Governance Parameters
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Quorum Percentage</span>
+                        <span className="text-lg font-bold">
+                          {quorumPercentage ? `${Number(quorumPercentage)}%` : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Proposal Threshold</span>
+                        <span className="text-lg font-bold">
+                          {proposalThreshold ? (() => {
+                            try {
+                              const threshold = parseFloat(formatUnits(proposalThreshold as bigint, 18));
+                              return `${threshold.toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens`;
+                            } catch {
+                              return 'N/A';
+                            }
+                          })() : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Voting Period</span>
+                        <span className="text-lg font-bold">
+                          {votingPeriod ? (() => {
+                            try {
+                              const days = Math.floor(Number(votingPeriod) / (24 * 60 * 60));
+                              const hours = Math.floor((Number(votingPeriod) % (24 * 60 * 60)) / (60 * 60));
+                              return `${days}d ${hours}h`;
+                            } catch {
+                              return 'N/A';
+                            }
+                          })() : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Total Proposals</span>
+                        <span className="text-lg font-bold">
+                          {isLoadingProposals ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : nextProposalId ? (
+                            (() => {
+                              try {
+                                const count = Number(nextProposalId);
+                                return isNaN(count) ? '0' : (count - 1).toString();
+                              } catch {
+                                return '0';
+                              }
+                            })()
+                          ) : '0'}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              {/* Your Voting Status */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.6 }}
+              >
+                <Card className="border-border/50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Vote className="h-5 w-5 text-primary" />
+                      Your Governance Status
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Voting Power</span>
+                        <span className="text-lg font-bold">
+                          {votingPower ? (() => {
+                            try {
+                              const power = parseFloat(formatUnits(votingPower as bigint, 18));
+                              return `${power.toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens`;
+                            } catch {
+                              return '0 tokens';
+                            }
+                          })() : '0 tokens'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Can Propose</span>
+                        <Badge variant={(() => {
+                          if (!proposalThreshold || !votingPower) return 'secondary';
+                          try {
+                            const threshold = proposalThreshold as bigint;
+                            const power = votingPower as bigint;
+                            return power >= threshold ? 'default' : 'secondary';
+                          } catch {
+                            return 'secondary';
+                          }
+                        })()}>
+                          {(() => {
+                            if (!proposalThreshold || !votingPower) return 'Check...';
+                            try {
+                              const threshold = proposalThreshold as bigint;
+                              const power = votingPower as bigint;
+                              return power >= threshold ? 'Yes' : 'No';
+                            } catch {
+                              return 'Unknown';
+                            }
+                          })()}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/30">
+                        <span className="text-sm font-medium text-muted-foreground">Wallet</span>
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not connected'}
+                        </span>
+                      </div>
+                      <Link to="/dao">
+                        <Button className="w-full mt-2" variant="default">
+                          <Vote className="h-4 w-4 mr-2" />
+                          View Full DAO Page
+                        </Button>
+                      </Link>
+                      <Link to="/dao/create">
+                        <Button className="w-full" variant="outline">
+                          <FileText className="h-4 w-4 mr-2" />
+                          Create Proposal
+                        </Button>
+                      </Link>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Recent Proposals Preview */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+            >
+              <Card className="border-border/50">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-primary" />
+                    Recent Proposals
+                  </CardTitle>
+                  <Link to="/dao">
+                    <Button variant="ghost" size="sm">
+                      View All
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </Link>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingProposals ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : !nextProposalId || Number(nextProposalId) <= 1 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <FileText className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">No proposals yet.</p>
+                      <p className="text-xs text-muted-foreground/70 mt-1">Be the first to create a proposal!</p>
+                      <Link to="/dao/create" className="mt-4">
+                        <Button variant="outline" size="sm">
+                          <FileText className="h-4 w-4 mr-2" />
+                          Create Proposal
+                        </Button>
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(() => {
+                        try {
+                          const totalProposals = Number(nextProposalId) - 1;
+                          const recentIds = Array.from(
+                            { length: Math.min(3, totalProposals) },
+                            (_, i) => totalProposals - i
+                          );
+                          return recentIds.map((id) => (
+                            <ProposalPreviewCard
+                              key={id}
+                              proposalId={BigInt(id)}
+                              daoAddress={daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined}
+                            />
+                          ));
+                        } catch {
+                          return (
+                            <div className="text-center py-4 text-muted-foreground">
+                              Error loading proposals
+                            </div>
+                          );
+                        }
+                      })()}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* DAO Contract Info */}
+            {daoAddress && daoAddress.startsWith('0x') && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.8 }}
+              >
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription className="flex items-center justify-between">
+                    <span className="text-sm">
+                      <strong>DAO Contract:</strong> {daoAddress}
+                      {chainId === 25 && <span className="ml-2 text-xs text-muted-foreground">(Mainnet)</span>}
+                      {chainId === 338 && <span className="ml-2 text-xs text-muted-foreground">(Testnet)</span>}
+                    </span>
+                    <Link to="/dao">
+                      <Button variant="ghost" size="sm">
+                        Manage DAO
+                      </Button>
+                    </Link>
+                  </AlertDescription>
+                </Alert>
+              </motion.div>
+            )}
+          </TabsContent>
         </Tabs>
         </>
       )}
       </div>
     </TooltipProvider>
   );
+}
+
+// Proposal Preview Card Component
+function ProposalPreviewCard({ 
+  proposalId, 
+  daoAddress 
+}: { 
+  proposalId: bigint; 
+  daoAddress: `0x${string}` | undefined;
+}) {
+  const { data, isLoading, error } = useReadContract({
+    address: daoAddress,
+    abi: DAO_ABI,
+    functionName: 'proposals',
+    args: [proposalId],
+    query: { retry: 2, retryDelay: 1000 },
+  });
+
+  if (isLoading) {
+    return (
+      <Card className="border-border/30">
+        <CardContent className="pt-4">
+          <Skeleton className="h-16 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error || !data) {
+    return null;
+  }
+
+  try {
+    const dataArray = [...(data as readonly unknown[])] as unknown[];
+    if (dataArray.length < 15) return null;
+
+    const [
+      ,
+      proposer,
+      startTime,
+      endTime,
+      forVotes,
+      againstVotes,
+      abstainVotes,
+      status,
+      ,
+      ,
+      ,
+      ,
+      ,
+      ,
+      description,
+    ] = dataArray as [bigint, string, bigint, bigint, bigint, bigint, bigint, number, number, string, bigint, string, string, string, string];
+
+    const statusNum = Number(status);
+    const endTimestamp = Number(endTime) * 1000;
+    const now = Date.now();
+    const isActive = statusNum === 1 && now < endTimestamp;
+    const isSucceeded = statusNum === 3;
+    const isDefeated = statusNum === 2;
+    const isExecuted = statusNum === 4;
+
+    let statusLabel = 'Pending';
+    let statusColor = 'bg-gray-500';
+    if (isActive) {
+      statusLabel = 'Active';
+      statusColor = 'bg-blue-500';
+    } else if (isExecuted) {
+      statusLabel = 'Executed';
+      statusColor = 'bg-purple-500';
+    } else if (isSucceeded) {
+      statusLabel = 'Succeeded';
+      statusColor = 'bg-green-500';
+    } else if (isDefeated) {
+      statusLabel = 'Defeated';
+      statusColor = 'bg-red-500';
+    }
+
+    const formatVotes = (votes: bigint) => {
+      try {
+        const num = Number(votes);
+        if (num >= 1000000) return `${(num / 1000000).toFixed(2)}M`;
+        if (num >= 1000) return `${(num / 1000).toFixed(2)}K`;
+        return num.toLocaleString();
+      } catch {
+        return '0';
+      }
+    };
+
+    let timeRemaining = '';
+    try {
+      const endDate = new Date(endTimestamp);
+      if (isActive && isValid(endDate)) {
+        timeRemaining = formatDistanceToNow(endDate, { addSuffix: true });
+      }
+    } catch {
+      // Ignore date errors
+    }
+
+    return (
+      <Link to={`/dao/${proposalId.toString()}`}>
+        <Card className="hover:border-primary transition-colors cursor-pointer border-border/30">
+          <CardContent className="pt-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2 flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">#{proposalId.toString()}</span>
+                  <Badge className={`${statusColor} text-white text-xs`}>
+                    {statusLabel}
+                  </Badge>
+                </div>
+                <p className="text-sm font-medium line-clamp-2">
+                  {description || 'No description'}
+                </p>
+                {isActive && timeRemaining && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Ends {timeRemaining}
+                  </p>
+                )}
+              </div>
+              <div className="text-right text-xs space-y-1 flex-shrink-0">
+                <p className="text-green-500 font-semibold flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" />
+                  {formatVotes(forVotes as bigint)}
+                </p>
+                <p className="text-red-500 font-semibold flex items-center gap-1">
+                  <XCircle className="h-3 w-3" />
+                  {formatVotes(againstVotes as bigint)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+    );
+  } catch (err) {
+    console.error(`Error rendering proposal ${proposalId.toString()}:`, err);
+    return null;
+  }
 }

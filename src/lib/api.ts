@@ -1244,6 +1244,201 @@ export async function getCronosBlockchainData(
   }
 }
 
+// ==================== Authentication API ====================
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  createdAt: string;
+}
+
+export interface SignInRequest {
+  email: string;
+  password: string;
+}
+
+export interface SignUpRequest {
+  email: string;
+  password: string;
+  name?: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
+}
+
+/**
+ * Sign in with email and password
+ */
+export async function signIn(
+  request: SignInRequest,
+  options?: RequestOptions
+): Promise<AuthResponse> {
+  try {
+    return await fetchWithRetry<AuthResponse>(
+      `${API_BASE_URL}/api/auth/signin`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      },
+      {
+        ...options,
+        cache: false,
+        retries: options?.retries ?? 0, // Don't retry auth failures
+      }
+    );
+  } catch (error: any) {
+    // Return null to trigger fallback in AuthContext
+    throw error;
+  }
+}
+
+/**
+ * Sign up with email, password, and optional name
+ */
+export async function signUp(
+  request: SignUpRequest,
+  options?: RequestOptions
+): Promise<AuthResponse> {
+  try {
+    return await fetchWithRetry<AuthResponse>(
+      `${API_BASE_URL}/api/auth/signup`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      },
+      {
+        ...options,
+        cache: false,
+        retries: options?.retries ?? 0, // Don't retry auth failures
+      }
+    );
+  } catch (error: any) {
+    // Return null to trigger fallback in AuthContext
+    throw error;
+  }
+}
+
+/**
+ * Get current user from token
+ */
+export async function getCurrentUser(
+  token: string,
+  options?: RequestOptions
+): Promise<User> {
+  return fetchWithRetry<User>(
+    `${API_BASE_URL}/api/auth/me`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
+/**
+ * Sign out (invalidate token)
+ */
+export async function signOut(
+  token: string,
+  options?: RequestOptions
+): Promise<void> {
+  try {
+    await fetchWithRetry<void>(
+      `${API_BASE_URL}/api/auth/signout`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      },
+      {
+        ...options,
+        cache: false,
+        retries: 0, // Don't retry signout
+      }
+    );
+  } catch (error) {
+    // Ignore signout errors - client side cleanup will still happen
+    console.warn('Sign out API call failed:', error);
+  }
+}
+
+/**
+ * Update user profile
+ */
+export interface UpdateProfileRequest {
+  name?: string;
+}
+
+export async function updateProfile(
+  token: string,
+  request: UpdateProfileRequest,
+  options?: RequestOptions
+): Promise<User> {
+  return fetchWithRetry<User>(
+    `${API_BASE_URL}/api/auth/profile`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+    }
+  );
+}
+
+/**
+ * Change password
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export async function changePassword(
+  token: string,
+  request: ChangePasswordRequest,
+  options?: RequestOptions
+): Promise<void> {
+  return fetchWithRetry<void>(
+    `${API_BASE_URL}/api/auth/change-password`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(request),
+    },
+    {
+      ...options,
+      cache: false,
+      retries: 0,
+    }
+  );
+}
+
 // Export API object for convenience
 export const api = {
   optimize: optimizeRoutes,
@@ -1271,6 +1466,13 @@ export const api = {
   executeProposal,
   // Cronos Blockchain API
   getCronosBlockchainData,
+  // Authentication API
+  signIn,
+  signUp,
+  getCurrentUser,
+  signOut,
+  updateProfile,
+  changePassword,
   clearCache,
   clearCachePattern,
 };

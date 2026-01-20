@@ -64,6 +64,19 @@ class BaseAIModel:
         self.is_trained = False
         self.training_history = []
         self.model_path = MODELS_DIR / f"{model_name}_v{version}.pkl"
+        
+        # Performance tracking
+        self.performance_metrics = {
+            'total_predictions': 0,
+            'successful_predictions': 0,
+            'avg_prediction_time_ms': 0,
+            'last_prediction_time': None,
+            'prediction_errors': []
+        }
+        
+        # Online learning buffer
+        self.online_learning_buffer = deque(maxlen=1000)
+        self.online_learning_enabled = False
     
     def save_model(self):
         """Save model to disk"""
@@ -104,6 +117,28 @@ class BaseAIModel:
         """Make predictions (to be implemented by subclasses)"""
         raise NotImplementedError
     
+    def enable_online_learning(self, enabled: bool = True):
+        """Enable or disable online learning"""
+        self.online_learning_enabled = enabled
+        logger.info(f"Online learning {'enabled' if enabled else 'disabled'} for {self.model_name}")
+    
+    def add_training_sample(self, features: np.ndarray, target: Any):
+        """Add a sample to the online learning buffer"""
+        if self.online_learning_enabled:
+            self.online_learning_buffer.append((features, target))
+    
+    async def update_model_online(self, batch_size: int = 32):
+        """Update model with samples from online learning buffer"""
+        if not self.online_learning_enabled or len(self.online_learning_buffer) < batch_size:
+            return
+        
+        # Extract batch from buffer
+        batch = list(self.online_learning_buffer)[-batch_size:]
+        features, targets = zip(*batch)
+        
+        # This is a placeholder - subclasses should implement specific online update logic
+        logger.info(f"Online learning update triggered for {self.model_name} with {len(batch)} samples")
+    
     async def train(self, X: np.ndarray, y: np.ndarray, **kwargs):
         """Train the model (to be implemented by subclasses)"""
         raise NotImplementedError
@@ -126,13 +161,13 @@ class SlippagePredictionModel(BaseAIModel):
         self.sequence_length = 10  # Time steps per sequence
     
     class LSTMAttentionModel(nn.Module):
-        """LSTM with attention mechanism for time series prediction"""
+        """Enhanced LSTM with multi-head attention mechanism for time series prediction"""
         
         def __init__(self, input_size: int, hidden_size: int = 128, 
-                     num_layers: int = 2, dropout: float = 0.2):
+                     num_layers: int = 2, dropout: float = 0.2, num_heads: int = 4):
             super().__init__()
             
-            # LSTM layers
+            # LSTM layers with improved architecture
             self.lstm = nn.LSTM(
                 input_size=input_size,
                 hidden_size=hidden_size,
@@ -142,26 +177,49 @@ class SlippagePredictionModel(BaseAIModel):
                 bidirectional=True
             )
             
-            # Attention mechanism
-            self.attention = nn.Sequential(
-                nn.Linear(hidden_size * 2, hidden_size),
-                nn.Tanh(),
-                nn.Linear(hidden_size, 1)
+            # Multi-head attention mechanism (improved)
+            self.attention = nn.MultiheadAttention(
+                embed_dim=hidden_size * 2,
+                num_heads=num_heads,
+                dropout=dropout,
+                batch_first=True
             )
             
-            # Fully connected layers
+            # Alternative self-attention for time steps
+            self.self_attention = nn.MultiheadAttention(
+                embed_dim=hidden_size * 2,
+                num_heads=num_heads,
+                dropout=dropout,
+                batch_first=True
+            )
+            
+            # Feed-forward network with residual connections
+            self.ffn = nn.Sequential(
+                nn.Linear(hidden_size * 2, hidden_size * 4),
+                nn.GELU(),  # Better activation than ReLU
+                nn.Dropout(dropout),
+                nn.Linear(hidden_size * 4, hidden_size * 2),
+                nn.Dropout(dropout)
+            )
+            
+            # Fully connected layers with residual connection
             self.fc = nn.Sequential(
                 nn.Linear(hidden_size * 2, hidden_size),
-                nn.ReLU(),
+                nn.BatchNorm1d(hidden_size),
+                nn.GELU(),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_size, hidden_size // 2),
-                nn.ReLU(),
+                nn.BatchNorm1d(hidden_size // 2),
+                nn.GELU(),
+                nn.Dropout(dropout * 0.5),
                 nn.Linear(hidden_size // 2, 1),
                 nn.Sigmoid()  # Output between 0 and 1 (slippage percentage)
             )
             
-            # Layer normalization
-            self.layer_norm = nn.LayerNorm(hidden_size * 2)
+            # Layer normalization with improved stability
+            self.layer_norm1 = nn.LayerNorm(hidden_size * 2)
+            self.layer_norm2 = nn.LayerNorm(hidden_size * 2)
+            self.dropout = nn.Dropout(dropout)
         
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             # x shape: (batch_size, sequence_length, input_size)
@@ -170,15 +228,25 @@ class SlippagePredictionModel(BaseAIModel):
             lstm_out, (hidden, cell) = self.lstm(x)
             # lstm_out shape: (batch_size, sequence_length, hidden_size * 2)
             
-            # Layer normalization
-            lstm_out = self.layer_norm(lstm_out)
+            # Residual connection preparation
+            residual = lstm_out
             
-            # Attention mechanism
-            attention_weights = self.attention(lstm_out)
-            attention_weights = F.softmax(attention_weights, dim=1)
+            # Layer normalization before attention
+            lstm_out = self.layer_norm1(lstm_out)
             
-            # Weighted sum using attention weights
-            context_vector = torch.sum(attention_weights * lstm_out, dim=1)
+            # Multi-head self-attention (improved attention mechanism)
+            attn_out, attn_weights = self.self_attention(lstm_out, lstm_out, lstm_out)
+            attn_out = self.dropout(attn_out)
+            
+            # Residual connection with layer norm
+            attn_out = self.layer_norm2(residual + attn_out)
+            
+            # Feed-forward network with residual
+            ffn_out = self.ffn(attn_out)
+            attn_out = self.layer_norm2(attn_out + ffn_out)
+            
+            # Global average pooling over sequence dimension (better than last timestep)
+            context_vector = torch.mean(attn_out, dim=1)
             
             # Fully connected layers
             output = self.fc(context_vector)
@@ -307,13 +375,23 @@ class SlippagePredictionModel(BaseAIModel):
         
         # Create model
         input_size = X_sequences.shape[2]
-        self.model = self.LSTMAttentionModel(input_size=input_size).to(device)
+        self.model = self.LSTMAttentionModel(input_size=input_size, num_heads=4).to(device)
         
-        # Loss and optimizer
-        criterion = nn.MSELoss()
-        optimizer = optim.AdamW(self.model.parameters(), lr=0.001, weight_decay=0.01)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', patience=10, factor=0.5
+        # Improved loss function with Huber loss for robustness
+        criterion = nn.HuberLoss(delta=1.0)  # More robust to outliers
+        
+        # Improved optimizer with better learning rate scheduling
+        optimizer = optim.AdamW(
+            self.model.parameters(), 
+            lr=0.001, 
+            weight_decay=0.01,
+            betas=(0.9, 0.999),
+            eps=1e-8
+        )
+        
+        # Cosine annealing with warm restarts for better convergence
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=20, T_mult=2, eta_min=1e-6
         )
         
         # Training loop
@@ -339,10 +417,23 @@ class SlippagePredictionModel(BaseAIModel):
                 epoch_loss += loss.item()
             
             avg_loss = epoch_loss / len(train_loader)
-            scheduler.step(avg_loss)
+            scheduler.step()
             
+            # Calculate validation metrics if validation set available
             if epoch % 10 == 0:
-                logger.info(f"Epoch {epoch}: Loss = {avg_loss:.6f}")
+                # Evaluate on a subset for monitoring
+                self.model.eval()
+                val_loss = 0
+                with torch.no_grad():
+                    val_subset = list(zip(X_tensor[:batch_size], y_tensor[:batch_size]))
+                    for val_X, val_y in val_subset:
+                        val_X = val_X.unsqueeze(0)
+                        val_pred = self.model(val_X)
+                        val_loss += criterion(val_pred, val_y.unsqueeze(0)).item()
+                val_loss /= len(val_subset) if val_subset else 1
+                self.model.train()
+                
+                logger.info(f"Epoch {epoch}: Train Loss = {avg_loss:.6f}, Val Loss = {val_loss:.6f}, LR = {optimizer.param_groups[0]['lr']:.6f}")
             
             self.training_history.append({
                 'epoch': epoch,

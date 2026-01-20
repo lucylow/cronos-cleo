@@ -27,7 +27,26 @@
 
 // --------------------------- Imports & Utilities ---------------------------
 
-import crypto from 'crypto';
+// Browser-compatible random bytes generator
+function getRandomBytes(length: number): Uint8Array {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint8Array(length);
+    window.crypto.getRandomValues(array);
+    return array;
+  }
+  // Fallback for Node.js environment (for testing)
+  const array = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    array[i] = Math.floor(Math.random() * 256);
+  }
+  return array;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 // Seeded RNG for reproducible results
 function seedRandom(seed: string) {
@@ -44,7 +63,7 @@ function seedRandom(seed: string) {
 const rng = seedRandom('cleo-mock-seed-v1');
 function rand(min = 0, max = 1) { return min + (max - min) * rng(); }
 function sample<T>(arr: T[]) { return arr[Math.floor(rng() * arr.length)]; }
-function uid(prefix = 'id') { return `${prefix}_${crypto.randomBytes(6).toString('hex')}`; }
+function uid(prefix = 'id') { return `${prefix}_${bytesToHex(getRandomBytes(6))}`; }
 
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
 
@@ -194,7 +213,7 @@ export type MempoolEvent = {
   note?: string;
 };
 
-function randomWallet() { return '0x' + crypto.randomBytes(20).toString('hex'); }
+function randomWallet() { return '0x' + bytesToHex(getRandomBytes(20)); }
 
 export function generateMempoolEvents(count = 50) {
   const events: MempoolEvent[] = [];

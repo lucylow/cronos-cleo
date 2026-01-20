@@ -11,8 +11,10 @@ import os
 import asyncio
 import logging
 import traceback
-from datetime import datetime
+import statistics
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from collections import defaultdict
 from dotenv import load_dotenv
 
 from ai.ai_agent import RouteOptimizerAgent
@@ -1870,16 +1872,50 @@ async def get_reconciliation_records(
 
 @app.get("/api/metrics/dashboard")
 async def get_dashboard_metrics():
-    """Get dashboard metrics and statistics"""
+    """Get dashboard metrics and statistics with comprehensive financial data"""
     try:
+        import random
+        from decimal import Decimal
+        from financial_metrics import financial_metrics_collector, ExecutionFinancials, MarketData, DEXFinancials, EconomicIndicators
+        
         # Try to get real metrics if available
         try:
             from performance_metrics import performance_tracker
             dashboard = performance_tracker.get_performance_dashboard()
-            return dashboard
+            
+            # Get comprehensive financial summary
+            financial_summary = financial_metrics_collector.get_financial_summary()
+            
+            # Build enhanced dashboard with financial data
+            result = {
+                "total_volume_usd": float(dashboard.get("all_time", {}).get("total_volume", 0)),
+                "total_executions": dashboard.get("all_time", {}).get("total_executions", 0),
+                "avg_savings_pct": float(dashboard.get("all_time", {}).get("average_slippage_improvement_pct", 0)),
+                "agent_status": dashboard.get("status", "active"),
+                "success_rate": float(dashboard.get("all_time", {}).get("success_rate", 0)),
+                "recent_executions": [],
+                "financial_summary": financial_summary,
+                "dex_distribution": {}
+            }
+            
+            # Build DEX distribution from performance tracker
+            dex_perf = dashboard.get("dex_performance", {})
+            total_dex_volume = sum(v.get("total_volume", 0) for v in dex_perf.values())
+            if total_dex_volume > 0:
+                result["dex_distribution"] = {
+                    dex: {
+                        "volume": perf.get("total_volume", 0),
+                        "count": perf.get("executions", 0),
+                        "percentage": (perf.get("total_volume", 0) / total_dex_volume * 100) if total_dex_volume > 0 else 0
+                    }
+                    for dex, perf in dex_perf.items()
+                }
+            
+            return result
+            
         except ImportError:
-            # Return mock data if performance tracker not available
-            import random
+            # Return mock data with comprehensive financial data if performance tracker not available
+            from financial_metrics import ExecutionFinancials, MarketData, DEXFinancials, EconomicIndicators
             
             # Generate more varied recent executions
             token_pairs = [
@@ -1892,46 +1928,159 @@ async def get_dashboard_metrics():
             ]
             
             recent_executions = []
-            now = int(datetime.now().timestamp())
+            now = datetime.now()
             
             for i in range(15):
                 token_in, token_out = random.choice(token_pairs)
-                time_offset = i * random.randint(60, 180)  # 1-3 minutes apart
+                time_offset = timedelta(seconds=i * random.randint(60, 180))
                 
                 # Varied amounts
-                base_amount = random.randint(5000, 500000)
-                amount_out_multiplier = random.uniform(0.48, 0.52)  # Approximate CRO price
+                base_amount = Decimal(str(random.randint(5000, 500000)))
+                amount_out_multiplier = Decimal(str(random.uniform(0.48, 0.52)))
+                amount_out = base_amount * amount_out_multiplier
                 
-                # Varied savings percentages
-                savings = random.uniform(1.5, 4.5)
+                # Calculate financials
+                savings_pct = Decimal(str(random.uniform(1.5, 4.5)))
+                savings_usd = base_amount * (savings_pct / 100)
+                gas_cost_usd = Decimal(str(random.uniform(0.5, 3.0)))
+                protocol_fee_usd = Decimal(str(random.uniform(0.1, 1.0)))
+                net_profit_usd = savings_usd - gas_cost_usd - protocol_fee_usd
+                roi_pct = (net_profit_usd / base_amount * 100) if base_amount > 0 else Decimal('0')
                 
                 # Varied statuses (mostly success, some pending)
                 statuses = ["success"] * 13 + ["pending"] * 2
                 
+                exec_financials = ExecutionFinancials(
+                    execution_id=f"exec_{i}_{random.randint(1000, 9999)}",
+                    timestamp=now - time_offset,
+                    token_in=token_in,
+                    token_out=token_out,
+                    amount_in_usd=base_amount,
+                    amount_out_usd=amount_out,
+                    gas_cost_usd=gas_cost_usd,
+                    protocol_fee_usd=protocol_fee_usd,
+                    net_profit_usd=net_profit_usd,
+                    savings_vs_single_dex_usd=savings_usd,
+                    savings_pct=savings_pct,
+                    roi_pct=roi_pct,
+                    dex_distribution={
+                        "VVS Finance": Decimal(str(random.uniform(30, 50))),
+                        "CronaSwap": Decimal(str(random.uniform(20, 40))),
+                        "MM Finance": Decimal(str(random.uniform(10, 30)))
+                    },
+                    market_conditions={
+                        "gas_price": random.uniform(8, 15),
+                        "network_congestion": random.uniform(0.2, 0.5),
+                        "volatility": random.uniform(0.1, 0.3)
+                    }
+                )
+                
+                # Add to collector for metrics
+                financial_metrics_collector.add_execution(exec_financials)
+                
                 recent_executions.append({
-                    "id": f"exec_{i}_{random.randint(1000, 9999)}",
-                    "timestamp": now - time_offset,
+                    "id": exec_financials.execution_id,
+                    "timestamp": int((exec_financials.timestamp).timestamp()),
                     "token_in": token_in,
                     "token_out": token_out,
-                    "amount_in": base_amount,
-                    "amount_out": int(base_amount * amount_out_multiplier),
-                    "savings_pct": round(savings, 2),
-                    "status": statuses[i] if i < len(statuses) else "success"
+                    "amount_in": float(base_amount),
+                    "amount_out": float(amount_out),
+                    "savings_pct": float(savings_pct),
+                    "status": statuses[i] if i < len(statuses) else "success",
+                    "gas_cost_usd": float(gas_cost_usd),
+                    "protocol_fee_usd": float(protocol_fee_usd),
+                    "profit_usd": float(net_profit_usd),
+                    "dex_distribution": {k: float(v) for k, v in exec_financials.dex_distribution.items()}
                 })
             
             # Sort by timestamp descending (most recent first)
             recent_executions.sort(key=lambda x: x["timestamp"], reverse=True)
             
+            # Add mock market data
+            for pair in ["CRO/USDC.e", "CRO/USDT", "USDC.e/USDT"]:
+                market_data = MarketData(
+                    pair=pair,
+                    current_price=Decimal(str(random.uniform(0.08, 1.0))),
+                    price_change_24h=Decimal(str(random.uniform(-0.05, 0.05))),
+                    price_change_7d=Decimal(str(random.uniform(-0.15, 0.15))),
+                    volatility_24h=Decimal(str(random.uniform(0.02, 0.08))),
+                    volatility_7d=Decimal(str(random.uniform(0.05, 0.20))),
+                    volume_24h=Decimal(str(random.uniform(100000, 1000000))),
+                    volume_7d=Decimal(str(random.uniform(700000, 7000000))),
+                    high_24h=Decimal(str(random.uniform(1.0, 1.1))),
+                    low_24h=Decimal(str(random.uniform(0.9, 1.0))),
+                    liquidity_usd=Decimal(str(random.uniform(500000, 5000000)))
+                )
+                financial_metrics_collector.update_market_data(pair, market_data)
+            
+            # Add mock DEX financials
+            for dex in ["VVS Finance", "CronaSwap", "MM Finance"]:
+                dex_financials = DEXFinancials(
+                    dex_name=dex,
+                    total_volume_24h=Decimal(str(random.uniform(1000000, 10000000))),
+                    total_volume_7d=Decimal(str(random.uniform(7000000, 70000000))),
+                    total_volume_30d=Decimal(str(random.uniform(30000000, 300000000))),
+                    total_fees_24h=Decimal(str(random.uniform(1000, 10000))),
+                    total_fees_7d=Decimal(str(random.uniform(7000, 70000))),
+                    avg_fee_rate_bps=Decimal(str(random.uniform(25, 35))),
+                    protocol_revenue_24h=Decimal(str(random.uniform(500, 5000))),
+                    active_pools=random.randint(50, 200),
+                    tvl_usd=Decimal(str(random.uniform(10000000, 100000000))),
+                    liquidity_concentration=Decimal(str(random.uniform(0.2, 0.8))),
+                    price_impact_score=Decimal(str(random.uniform(0.001, 0.01)))
+                )
+                financial_metrics_collector.update_dex_financials(dex, dex_financials)
+            
+            # Add mock economic indicators
+            economic_indicators = EconomicIndicators(
+                gas_price_gwei=Decimal(str(random.uniform(8, 15))),
+                gas_price_avg_24h=Decimal(str(random.uniform(9, 14))),
+                network_congestion=Decimal(str(random.uniform(0.2, 0.6))),
+                total_value_locked_usd=Decimal(str(random.uniform(50000000, 500000000))),
+                defi_apy_avg=Decimal(str(random.uniform(0.05, 0.20))),
+                staking_yield=Decimal(str(random.uniform(0.10, 0.15))),
+                borrowing_rate=Decimal(str(random.uniform(0.08, 0.12))),
+                correlation_crypto_index=Decimal(str(random.uniform(0.6, 0.9))),
+                market_regime=random.choice(["bull", "bear", "sideways", "volatile"])
+            )
+            financial_metrics_collector.update_economic_indicators(economic_indicators)
+            
+            # Get comprehensive financial summary
+            financial_summary = financial_metrics_collector.get_financial_summary()
+            
+            # Calculate total volume and savings from executions
+            total_volume = sum(e["amount_in"] for e in recent_executions)
+            avg_savings = statistics.mean([e["savings_pct"] for e in recent_executions]) if recent_executions else 0
+            
+            # Build DEX distribution
+            dex_dist = defaultdict(lambda: {"volume": 0, "count": 0})
+            for exec in recent_executions:
+                for dex, pct in exec.get("dex_distribution", {}).items():
+                    dex_dist[dex]["volume"] += exec["amount_in"] * (pct / 100)
+                    dex_dist[dex]["count"] += 1
+            
+            total_dex_volume = sum(d["volume"] for d in dex_dist.values())
+            
             return {
-                "total_volume_usd": 3456789,
-                "total_executions": 1247,
-                "avg_savings_pct": 2.87,
+                "total_volume_usd": total_volume * 1200,  # Scale up for demo
+                "total_executions": len(recent_executions) * 80,  # Scale up for demo
+                "avg_savings_pct": avg_savings,
                 "agent_status": "active",
                 "success_rate": 98.5,
                 "avg_gas_efficiency": 0.95,
-                "recent_executions": recent_executions
+                "recent_executions": recent_executions,
+                "financial_summary": financial_summary,
+                "dex_distribution": {
+                    dex: {
+                        "volume": dist["volume"],
+                        "count": dist["count"],
+                        "percentage": (dist["volume"] / total_dex_volume * 100) if total_dex_volume > 0 else 0
+                    }
+                    for dex, dist in dex_dist.items()
+                }
             }
     except Exception as e:
+        logger.error(f"Error getting dashboard metrics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== Multi-DEX Routing Endpoints ====================
@@ -2127,6 +2276,29 @@ async def get_daily_analytics(days: int = 7):
         raise
     except Exception as e:
         logger.error(f"Error getting daily analytics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/metrics/financial")
+async def get_financial_metrics():
+    """Get comprehensive financial metrics for AI decision making"""
+    try:
+        from financial_metrics import financial_metrics_collector
+        
+        financial_summary = financial_metrics_collector.get_financial_summary()
+        recent_executions = financial_metrics_collector.get_executions_for_ai(limit=100)
+        
+        return {
+            "financial_summary": financial_summary,
+            "recent_executions": recent_executions,
+            "timestamp": datetime.now().isoformat()
+        }
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Financial metrics collector not available"
+        )
+    except Exception as e:
+        logger.error(f"Error getting financial metrics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/agent/status")

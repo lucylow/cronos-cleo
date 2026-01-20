@@ -10,10 +10,14 @@ export default function AppLayout() {
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Subtle background gradient overlay */}
+      <div className="fixed inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
+      <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_50%,hsl(262_52%_52%_/_0.05),transparent_50%)] pointer-events-none" />
+      
       <NavBar onOpenSidebar={() => setSidebarOpen(true)} />
       
-      <div className="flex">
+      <div className="flex relative z-10">
         <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         
         <main className="flex-1 min-h-[calc(100vh-56px)]">
@@ -23,8 +27,8 @@ export default function AppLayout() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="p-3 sm:p-4 lg:p-6"
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="p-3 sm:p-4 lg:p-6 relative z-10"
             >
               {location.pathname !== '/dashboard' && (
                 <Breadcrumb className="mb-4">
