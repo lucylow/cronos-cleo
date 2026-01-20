@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { api, ApiClientError } from '@/lib/api';
-import { ConnectionStatus } from '@/components/ConnectionStatus';
+import ConnectionStatus from '@/components/ConnectionStatus';
 import { getDashboardMetricsWebSocket, WebSocketState, WebSocketMessage } from '@/lib/websocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
