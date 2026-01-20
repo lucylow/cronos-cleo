@@ -404,6 +404,252 @@ export function summarizeSimulation(routes: AgentRoute[]) {
   return { totalIn, totalOut, avgSlippagePct: Number(avgSlippagePct.toFixed(3)) };
 }
 
+// --------------------------- Dashboard Metrics Mock Generator ---------------------------
+
+export function generateMockDashboardMetrics() {
+  const now = nowSeconds();
+  const recentExecutions = [];
+  
+  // Generate comprehensive recent executions
+  const dexes = ['VVS Finance', 'CronaSwap', 'MM Finance'];
+  const tokens = ['CRO', 'USDC.e', 'USDT', 'WETH', 'DAI'];
+  const statuses = ['success', 'success', 'success', 'success', 'pending', 'failed'];
+  
+  for (let i = 0; i < 25; i++) {
+    const dexDist: Record<string, number> = {};
+    const numDexes = Math.floor(rand(1, 4));
+    const selectedDexes = [...dexes].sort(() => rand(-1, 1)).slice(0, numDexes);
+    const total = 100;
+    let remaining = 100;
+    
+    selectedDexes.forEach((dex, idx) => {
+      if (idx === selectedDexes.length - 1) {
+        dexDist[dex] = remaining;
+      } else {
+        const share = Math.floor(rand(20, remaining / 2));
+        dexDist[dex] = share;
+        remaining -= share;
+      }
+    });
+    
+    const tokenIn = sample(tokens);
+    const tokenOut = sample(tokens.filter(t => t !== tokenIn));
+    const amountIn = Math.floor(rand(1_000, 500_000));
+    const amountOut = Math.floor(amountIn * rand(0.95, 1.05));
+    const savings = rand(0.1, 5.0);
+    const gasCost = rand(0.5, 15.0);
+    const protocolFee = rand(0.1, 5.0);
+    const profit = Math.max(0, savings - gasCost - protocolFee);
+    
+    recentExecutions.push({
+      id: uid('exec'),
+      timestamp: now - Math.floor(rand(0, 7 * 24 * 60 * 60)), // Within last week
+      token_in: tokenIn,
+      token_out: tokenOut,
+      amount_in: amountIn,
+      amount_out: amountOut,
+      savings_pct: Number(savings.toFixed(3)),
+      status: sample(statuses),
+      gas_cost_usd: Number(gasCost.toFixed(2)),
+      protocol_fee_usd: Number(protocolFee.toFixed(2)),
+      profit_usd: Number(profit.toFixed(2)),
+      dex_distribution: dexDist,
+    });
+  }
+  
+  // Sort by timestamp descending
+  recentExecutions.sort((a, b) => b.timestamp - a.timestamp);
+  
+  // Calculate totals
+  const baseVolume = recentExecutions.reduce((sum, e) => sum + (e.amount_in || 0), 0);
+  const totalVolume = baseVolume * rand(50, 100); // Scale up for demo
+  const totalExecutions = recentExecutions.length * Math.floor(rand(50, 150));
+  const avgSavings = recentExecutions.length > 0
+    ? recentExecutions.reduce((sum, e) => sum + (e.savings_pct || 0), 0) / recentExecutions.length
+    : rand(0.5, 4.0);
+  const successRate = recentExecutions.length > 0
+    ? (recentExecutions.filter(e => e.status === 'success').length / recentExecutions.length) * 100
+    : rand(95, 99.5);
+  
+  // Calculate financial summary
+  const baseProfit = recentExecutions.reduce((sum, e) => sum + (e.profit_usd || 0), 0);
+  const baseGas = recentExecutions.reduce((sum, e) => sum + (e.gas_cost_usd || 0), 0);
+  const baseFees = recentExecutions.reduce((sum, e) => sum + (e.protocol_fee_usd || 0), 0);
+  const scaleFactor = rand(0.8, 1.2); // Scale by 0.8x to 1.2x
+  const totalProfit = baseProfit * scaleFactor * rand(80, 120); // Additional scaling for demo
+  const totalGas = baseGas * scaleFactor * rand(80, 120);
+  const totalFees = baseFees * scaleFactor * rand(80, 120);
+  const totalCosts = totalGas + totalFees;
+  const totalRevenue = totalProfit + totalCosts;
+  
+  // Calculate DEX distribution
+  const dexDistribution: Record<string, { volume: number; count: number; percentage: number }> = {};
+  recentExecutions.forEach(exec => {
+    Object.entries(exec.dex_distribution || {}).forEach(([dex, pct]) => {
+      if (!dexDistribution[dex]) {
+        dexDistribution[dex] = { volume: 0, count: 0, percentage: 0 };
+      }
+      dexDistribution[dex].volume += (exec.amount_in || 0) * (pct / 100);
+      dexDistribution[dex].count += 1;
+    });
+  });
+  
+  const totalDexVolume = Object.values(dexDistribution).reduce((sum, d) => sum + d.volume, 0);
+  Object.keys(dexDistribution).forEach(dex => {
+    if (totalDexVolume > 0) {
+      dexDistribution[dex].percentage = (dexDistribution[dex].volume / totalDexVolume) * 100;
+    }
+  });
+  
+  // Generate daily trends for last 30 days
+  const dailyTrends = [];
+  for (let i = 29; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    dailyTrends.push({
+      date: date.toISOString().split('T')[0],
+      volume: Math.floor(rand(50_000, 500_000)),
+      profit: rand(100, 5000),
+      costs: rand(50, 3000),
+      executions: Math.floor(rand(5, 50)),
+      success_rate: rand(95, 99.5),
+    });
+  }
+  
+  // Generate market data
+  const marketData: Record<string, {
+    current_price: number;
+    price_change_24h: number;
+    price_change_7d: number;
+    volatility_24h: number;
+    volume_24h: number;
+    liquidity_usd: number;
+  }> = {};
+  
+  const pairs = ['CRO/USDC.e', 'CRO/USDT', 'USDC.e/USDT', 'CRO/WETH', 'WETH/USDC.e'];
+  pairs.forEach(pair => {
+    const basePrice = pair.includes('CRO') ? 0.15 : pair.includes('WETH') ? 2500 : 1.0;
+    marketData[pair] = {
+      current_price: basePrice * rand(0.9, 1.1),
+      price_change_24h: rand(-0.05, 0.05),
+      price_change_7d: rand(-0.15, 0.15),
+      volatility_24h: rand(0.02, 0.08),
+      volume_24h: rand(100_000, 1_000_000),
+      liquidity_usd: rand(500_000, 5_000_000),
+    };
+  });
+  
+  // Generate DEX financials
+  const dexFinancials: Record<string, {
+    total_volume_24h: number;
+    total_fees_24h: number;
+    tvl_usd: number;
+    price_impact_score: number;
+  }> = {};
+  
+  dexes.forEach(dex => {
+    dexFinancials[dex] = {
+      total_volume_24h: rand(100_000, 2_000_000),
+      total_fees_24h: rand(100, 10_000),
+      tvl_usd: rand(500_000, 10_000_000),
+      price_impact_score: rand(0.1, 2.0),
+    };
+  });
+  
+  return {
+    total_volume_usd: Number(totalVolume.toFixed(2)),
+    total_executions: totalExecutions,
+    avg_savings_pct: Number(avgSavings.toFixed(3)),
+    agent_status: 'active',
+    success_rate: Number(successRate.toFixed(2)),
+    recent_executions: recentExecutions.slice(0, 20), // Return top 20 most recent
+    financial_summary: {
+      total_profit_usd: Number(totalProfit.toFixed(2)),
+      total_costs_usd: Number(totalCosts.toFixed(2)),
+      total_gas_costs_usd: Number(totalGas.toFixed(2)),
+      total_protocol_fees_usd: Number(totalFees.toFixed(2)),
+      total_revenue_usd: Number(totalRevenue.toFixed(2)),
+      roi_pct: totalVolume > 0 ? Number(((totalProfit / totalVolume) * 100).toFixed(3)) : 0,
+      avg_profit_per_execution: totalExecutions > 0 ? Number((totalProfit / totalExecutions).toFixed(2)) : 0,
+      avg_cost_per_execution: totalExecutions > 0 ? Number((totalCosts / totalExecutions).toFixed(2)) : 0,
+      avg_volume_per_execution: totalExecutions > 0 ? Number((totalVolume / totalExecutions).toFixed(2)) : 0,
+      returns_distribution: {
+        mean: rand(0.5, 3.0),
+        median: rand(0.3, 2.8),
+        std: rand(0.1, 1.5),
+        min: rand(-2.0, 0),
+        max: rand(5.0, 10.0),
+        percentile_25: rand(0, 1.5),
+        percentile_75: rand(2.0, 5.0),
+      },
+      risk_metrics: {
+        var_95_1d: rand(-50, -10),
+        var_99_1d: rand(-100, -20),
+        cvar_95_1d: rand(-60, -15),
+        max_drawdown: rand(-5, -1),
+        sharpe_ratio: rand(0.5, 3.0),
+        sortino_ratio: rand(0.8, 4.0),
+        calmar_ratio: rand(0.3, 2.0),
+        win_rate: successRate,
+        profit_factor: rand(1.2, 3.5),
+        average_win: rand(50, 500),
+        average_loss: rand(-200, -20),
+      },
+      market_data: marketData,
+      dex_financials: dexFinancials,
+      economic_indicators: {
+        gas_price_gwei: rand(1, 50),
+        network_congestion: rand(0.1, 0.9),
+        total_value_locked_usd: rand(10_000_000, 100_000_000),
+        market_regime: sample(['bull', 'bear', 'sideways']),
+      },
+      daily_trends: dailyTrends,
+    },
+    dex_distribution: dexDistribution,
+  };
+}
+
+// --------------------------- Agent Status Mock Generator ---------------------------
+
+export function generateMockAgentStatus() {
+  const now = nowSeconds();
+  const recentDecisions = [];
+  
+  const dexes = ['VVS Finance', 'CronaSwap', 'MM Finance'];
+  const routes = [
+    'VVS 45% → MMF 35% → CronaSwap 20%',
+    'MMF 60% → VVS 40%',
+    'VVS 100%',
+    'CronaSwap 55% → MMF 45%',
+    'VVS 70% → CronaSwap 30%',
+    'MMF 100%',
+    'CronaSwap 100%',
+  ];
+  
+  for (let i = 0; i < 10; i++) {
+    recentDecisions.push({
+      id: uid('dec'),
+      timestamp: now - Math.floor(rand(0, 24 * 60 * 60)), // Within last 24 hours
+      route: sample(routes),
+      details: `Optimized ${Math.floor(rand(5_000, 500_000)).toLocaleString()} CRO → USDC.e swap with ${rand(0.1, 2.0).toFixed(2)}% slippage`,
+      status: sample(['success', 'success', 'success', 'pending', 'failed']),
+    });
+  }
+  
+  recentDecisions.sort((a, b) => b.timestamp - a.timestamp);
+  
+  return {
+    status: 'online',
+    available: true,
+    decisions_today: Math.floor(rand(500, 2000)),
+    avg_response_time_ms: Math.floor(rand(20, 100)),
+    recent_decisions: recentDecisions.slice(0, 5), // Return top 5 most recent
+    uptime_seconds: Math.floor(rand(86400, 604800)), // 1-7 days
+    version: '1.0.0',
+    last_heartbeat: now,
+  };
+}
+
 // --------------------------- Test Fixtures Export ---------------------------
 
 export const FIXTURES = {

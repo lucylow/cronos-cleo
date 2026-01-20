@@ -88,7 +88,7 @@ class MultiLegTransaction(Base):
     block_number = Column(Integer, nullable=True)
     
     # Metadata
-    metadata = Column(Text, nullable=True)  # JSON string for additional data
+    extra_metadata = Column('metadata', Text, nullable=True)  # JSON string for additional data
     error_message = Column(Text, nullable=True)
     
     # Relationships
@@ -110,7 +110,7 @@ class MultiLegTransaction(Base):
             "deadline": self.deadline.isoformat() if self.deadline else None,
             "on_chain_tx_hash": self.on_chain_tx_hash,
             "block_number": self.block_number,
-            "metadata": json.loads(self.metadata) if self.metadata else {},
+            "metadata": json.loads(self.extra_metadata) if self.extra_metadata else {},
             "error_message": self.error_message,
             "legs_count": len(self.legs) if self.legs else 0
         }
@@ -150,7 +150,7 @@ class TransactionLeg(Base):
     compensated_at = Column(DateTime, nullable=True)
     
     # Metadata
-    metadata = Column(Text, nullable=True)  # JSON string
+    extra_metadata = Column('metadata', Text, nullable=True)  # JSON string
     error_message = Column(Text, nullable=True)
     
     # Relationships
@@ -176,7 +176,7 @@ class TransactionLeg(Base):
             "requires_compensation": self.requires_compensation,
             "compensation_leg_id": self.compensation_leg_id,
             "compensated_at": self.compensated_at.isoformat() if self.compensated_at else None,
-            "metadata": json.loads(self.metadata) if self.metadata else {},
+            "metadata": json.loads(self.extra_metadata) if self.extra_metadata else {},
             "error_message": self.error_message
         }
 
@@ -213,7 +213,7 @@ class Batch(Base):
     failure_count = Column(Integer, default=0, nullable=False)
     
     # Metadata
-    metadata = Column(Text, nullable=True)
+    extra_metadata = Column('metadata', Text, nullable=True)
     error_message = Column(Text, nullable=True)
     
     # Relationships
@@ -238,7 +238,7 @@ class Batch(Base):
             "gas_saved": self.gas_saved,
             "success_count": self.success_count,
             "failure_count": self.failure_count,
-            "metadata": json.loads(self.metadata) if self.metadata else {},
+            "metadata": json.loads(self.extra_metadata) if self.extra_metadata else {},
             "error_message": self.error_message,
             "items_count": len(self.batch_items) if self.batch_items else 0
         }
@@ -334,7 +334,7 @@ class ReconciliationRecord(Base):
     reconciled_at = Column(DateTime, nullable=True)
     
     # Metadata
-    metadata = Column(Text, nullable=True)
+    extra_metadata = Column('metadata', Text, nullable=True)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -347,6 +347,6 @@ class ReconciliationRecord(Base):
             "discrepancy": self.discrepancy,
             "status": self.status,
             "reconciled_at": self.reconciled_at.isoformat() if self.reconciled_at else None,
-            "metadata": json.loads(self.metadata) if self.metadata else {}
+            "metadata": json.loads(self.extra_metadata) if self.extra_metadata else {}
         }
 

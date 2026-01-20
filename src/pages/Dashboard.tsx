@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { api, ApiClientError } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import ConnectionStatus from '@/components/ConnectionStatus';
 import { getDashboardMetricsWebSocket, WebSocketState, WebSocketMessage } from '@/lib/websocket';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -111,6 +112,7 @@ interface DashboardMetrics {
 }
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [agentStatus, setAgentStatus] = useState<any>(null);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [contractErrors, setContractErrors] = useState<Record<string, string>>({});
 
   // Cronos blockchain data
   const { data: blockchainData, isConnected: isBlockchainConnected } = useCronosBlockchain({
@@ -144,8 +147,8 @@ export default function Dashboard() {
     return DAO_ADDRESS_TESTNET;
   }, [chainId]);
 
-  // DAO governance data
-  const { data: nextProposalId, isLoading: isLoadingProposals } = useReadContract({
+  // DAO governance data with error handling
+  const { data: nextProposalId, isLoading: isLoadingProposals, error: nextProposalIdError } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'nextProposalId',
@@ -155,7 +158,7 @@ export default function Dashboard() {
     },
   });
 
-  const { data: quorumPercentage } = useReadContract({
+  const { data: quorumPercentage, error: quorumError } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'quorumPercentage',
@@ -165,7 +168,7 @@ export default function Dashboard() {
     },
   });
 
-  const { data: proposalThreshold } = useReadContract({
+  const { data: proposalThreshold, error: thresholdError } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'proposalThreshold',
@@ -175,7 +178,7 @@ export default function Dashboard() {
     },
   });
 
-  const { data: votingPeriod } = useReadContract({
+  const { data: votingPeriod, error: votingPeriodError } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'votingPeriod',
@@ -185,8 +188,8 @@ export default function Dashboard() {
     },
   });
 
-  // Get governance token address and user balance
-  const { data: governanceTokenAddress } = useReadContract({
+  // Get governance token address and user balance with error handling
+  const { data: governanceTokenAddress, error: governanceTokenError } = useReadContract({
     address: daoAddress && daoAddress.startsWith('0x') ? (daoAddress as `0x${string}`) : undefined,
     abi: DAO_ABI,
     functionName: 'governanceToken',
@@ -196,7 +199,7 @@ export default function Dashboard() {
     },
   });
 
-  const { data: votingPower } = useReadContract({
+  const { data: votingPower, error: votingPowerError } = useReadContract({
     address: governanceTokenAddress as `0x${string}` | undefined,
     abi: [
       {
@@ -214,6 +217,51 @@ export default function Dashboard() {
       retry: 2 
     },
   });
+
+  // Handle contract read errors
+  useEffect(() => {
+    const errors: Record<string, string> = {};
+    
+    if (nextProposalIdError) {
+      errors.nextProposalId = 'Failed to load proposal ID';
+      console.error('Error loading nextProposalId:', nextProposalIdError);
+    }
+    if (quorumError) {
+      errors.quorum = 'Failed to load quorum percentage';
+      console.error('Error loading quorum:', quorumError);
+    }
+    if (thresholdError) {
+      errors.threshold = 'Failed to load proposal threshold';
+      console.error('Error loading threshold:', thresholdError);
+    }
+    if (votingPeriodError) {
+      errors.votingPeriod = 'Failed to load voting period';
+      console.error('Error loading voting period:', votingPeriodError);
+    }
+    if (governanceTokenError) {
+      errors.governanceToken = 'Failed to load governance token';
+      console.error('Error loading governance token:', governanceTokenError);
+    }
+    if (votingPowerError) {
+      errors.votingPower = 'Failed to load voting power';
+      console.error('Error loading voting power:', votingPowerError);
+    }
+    
+    if (Object.keys(errors).length > 0) {
+      setContractErrors(errors);
+      // Only show toast for new errors to avoid spamming
+      const newErrors = Object.keys(errors).filter(key => !contractErrors[key]);
+      if (newErrors.length > 0) {
+        toast({
+          title: 'Contract read error',
+          description: `Failed to load some DAO data: ${newErrors.join(', ')}`,
+          variant: 'destructive',
+        });
+      }
+    } else {
+      setContractErrors({});
+    }
+  }, [nextProposalIdError, quorumError, thresholdError, votingPeriodError, governanceTokenError, votingPowerError, toast]);
 
   const fetchMetrics = useCallback(async (showRefreshing = false) => {
     try {
@@ -334,6 +382,13 @@ export default function Dashboard() {
       setError(errorMessage);
       setUsingMockData(true);
       
+      // Show toast notification for user feedback
+      toast({
+        title: 'Error loading metrics',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      
       // Set minimal metrics structure to prevent rendering errors
       setMetrics({
         total_volume_usd: 0,
@@ -350,10 +405,28 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetchMetrics();
-    // Refresh every 30 seconds
-    const interval = setInterval(() => fetchMetrics(false), 30000);
-    return () => clearInterval(interval);
+    try {
+      fetchMetrics();
+      // Refresh every 30 seconds
+      const interval = setInterval(() => {
+        try {
+          fetchMetrics(false);
+        } catch (err) {
+          console.error('Error in interval metrics fetch:', err);
+          // Don't set error state here to avoid spamming, just log
+        }
+      }, 30000);
+      return () => {
+        try {
+          clearInterval(interval);
+        } catch (err) {
+          console.error('Error clearing interval:', err);
+        }
+      };
+    } catch (err) {
+      console.error('Error setting up metrics refresh:', err);
+      setError(err instanceof Error ? err.message : 'Failed to initialize dashboard');
+    }
   }, [fetchMetrics]);
 
   // WebSocket connection for real-time updates
@@ -691,7 +764,13 @@ export default function Dashboard() {
     try {
       if (!metrics) {
         console.warn('No metrics to export');
-        setError('No data available to export');
+        const errorMsg = 'No data available to export';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -700,7 +779,13 @@ export default function Dashboard() {
         dataStr = JSON.stringify(metrics, null, 2);
       } catch (stringifyErr) {
         console.error('Error stringifying metrics:', stringifyErr);
-        setError('Failed to format data for export');
+        const errorMsg = 'Failed to format data for export';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -709,7 +794,13 @@ export default function Dashboard() {
         dataBlob = new Blob([dataStr], { type: 'application/json' });
       } catch (blobErr) {
         console.error('Error creating blob:', blobErr);
-        setError('Failed to create export file');
+        const errorMsg = 'Failed to create export file';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -748,22 +839,43 @@ export default function Dashboard() {
         }, 100);
       } catch (downloadErr) {
         console.error('Error triggering download:', downloadErr);
-        URL.revokeObjectURL(url);
-        setError('Failed to initiate download');
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // Ignore cleanup errors
+        }
+        const errorMsg = 'Failed to initiate download';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error during export';
       console.error('Export error:', errorMessage, err);
       setError(`Export failed: ${errorMessage}`);
+      toast({
+        title: 'Export failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     }
-  }, [metrics]);
+  }, [metrics, toast]);
 
   // Export financial data as CSV
   const handleExportCSV = useCallback(() => {
     try {
       if (!metrics?.recent_executions || !Array.isArray(metrics.recent_executions) || metrics.recent_executions.length === 0) {
         console.warn('No execution data to export');
-        setError('No execution data available to export');
+        const errorMsg = 'No execution data available to export';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
     
@@ -829,7 +941,13 @@ export default function Dashboard() {
       }).filter((row): row is string[] => row !== null); // Filter out null rows
 
       if (rows.length === 0) {
-        setError('No valid execution data to export');
+        const errorMsg = 'No valid execution data to export';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -853,7 +971,13 @@ export default function Dashboard() {
     ].join('\n');
       } catch (csvErr) {
         console.error('Error generating CSV content:', csvErr);
-        setError('Failed to format CSV data');
+        const errorMsg = 'Failed to format CSV data';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -862,7 +986,13 @@ export default function Dashboard() {
         dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       } catch (blobErr) {
         console.error('Error creating CSV blob:', blobErr);
-        setError('Failed to create CSV file');
+        const errorMsg = 'Failed to create CSV file';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -901,15 +1031,30 @@ export default function Dashboard() {
         }, 100);
       } catch (downloadErr) {
         console.error('Error triggering CSV download:', downloadErr);
-        URL.revokeObjectURL(url);
-        setError('Failed to initiate download');
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // Ignore cleanup errors
+        }
+        const errorMsg = 'Failed to initiate download';
+        setError(errorMsg);
+        toast({
+          title: 'Export failed',
+          description: errorMsg,
+          variant: 'destructive',
+        });
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error during CSV export';
       console.error('CSV export error:', errorMessage, err);
       setError(`CSV export failed: ${errorMessage}`);
+      toast({
+        title: 'Export failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     }
-  }, [metrics]);
+  }, [metrics, toast]);
 
   const formatCurrency = useCallback((value: number | undefined | null): string => {
     try {
@@ -1050,55 +1195,137 @@ export default function Dashboard() {
       const marketData = summary.market_data || {};
 
       // Returns distribution for visualization
-      const returnsDistribution = [
-        { label: 'Min', value: returns.min || 0, color: 'hsl(0, 84%, 60%)' },
-        { label: 'Q1 (25%)', value: returns.percentile_25 || 0, color: 'hsl(217, 91%, 60%)' },
-        { label: 'Median', value: returns.median || 0, color: 'hsl(142, 76%, 36%)' },
-        { label: 'Mean', value: returns.mean || 0, color: 'hsl(262, 83%, 58%)' },
-        { label: 'Q3 (75%)', value: returns.percentile_75 || 0, color: 'hsl(217, 91%, 60%)' },
-        { label: 'Max', value: returns.max || 0, color: 'hsl(0, 84%, 60%)' },
-      ].filter(item => item.value !== undefined && item.value !== null);
+      let returnsDistribution: Array<{ label: string; value: number; color: string }> = [];
+      try {
+        returnsDistribution = [
+          { label: 'Min', value: (typeof returns?.min === 'number' && isFinite(returns.min)) ? returns.min : 0, color: 'hsl(0, 84%, 60%)' },
+          { label: 'Q1 (25%)', value: (typeof returns?.percentile_25 === 'number' && isFinite(returns.percentile_25)) ? returns.percentile_25 : 0, color: 'hsl(217, 91%, 60%)' },
+          { label: 'Median', value: (typeof returns?.median === 'number' && isFinite(returns.median)) ? returns.median : 0, color: 'hsl(142, 76%, 36%)' },
+          { label: 'Mean', value: (typeof returns?.mean === 'number' && isFinite(returns.mean)) ? returns.mean : 0, color: 'hsl(262, 83%, 58%)' },
+          { label: 'Q3 (75%)', value: (typeof returns?.percentile_75 === 'number' && isFinite(returns.percentile_75)) ? returns.percentile_75 : 0, color: 'hsl(217, 91%, 60%)' },
+          { label: 'Max', value: (typeof returns?.max === 'number' && isFinite(returns.max)) ? returns.max : 0, color: 'hsl(0, 84%, 60%)' },
+        ].filter(item => item.value !== undefined && item.value !== null && isFinite(item.value));
+      } catch (err) {
+        console.error('Error processing returns distribution:', err);
+        returnsDistribution = [];
+      }
 
       // Risk metrics for bar chart
-      const riskMetricsData = [
-        { name: 'Sharpe Ratio', value: risk.sharpe_ratio || 0, color: risk.sharpe_ratio && risk.sharpe_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
-        { name: 'Sortino Ratio', value: risk.sortino_ratio || 0, color: risk.sortino_ratio && risk.sortino_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
-        { name: 'Calmar Ratio', value: risk.calmar_ratio || 0, color: risk.calmar_ratio && risk.calmar_ratio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
-        { name: 'Profit Factor', value: risk.profit_factor || 0, color: risk.profit_factor && risk.profit_factor > 1 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
-        { name: 'Win Rate', value: risk.win_rate ? risk.win_rate * 100 : 0, color: risk.win_rate && risk.win_rate > 0.5 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
-        { name: 'Max Drawdown', value: risk.max_drawdown ? Math.abs(risk.max_drawdown) * 100 : 0, color: 'hsl(0, 84%, 60%)' },
-      ];
+      let riskMetricsData: Array<{ name: string; value: number; color: string }> = [];
+      try {
+        const sharpeRatio = (typeof risk?.sharpe_ratio === 'number' && isFinite(risk.sharpe_ratio)) ? risk.sharpe_ratio : 0;
+        const sortinoRatio = (typeof risk?.sortino_ratio === 'number' && isFinite(risk.sortino_ratio)) ? risk.sortino_ratio : 0;
+        const calmarRatio = (typeof risk?.calmar_ratio === 'number' && isFinite(risk.calmar_ratio)) ? risk.calmar_ratio : 0;
+        const profitFactor = (typeof risk?.profit_factor === 'number' && isFinite(risk.profit_factor)) ? risk.profit_factor : 0;
+        const winRate = (typeof risk?.win_rate === 'number' && isFinite(risk.win_rate)) ? risk.win_rate : 0;
+        const maxDrawdown = (typeof risk?.max_drawdown === 'number' && isFinite(risk.max_drawdown)) ? risk.max_drawdown : 0;
+        
+        riskMetricsData = [
+          { name: 'Sharpe Ratio', value: sharpeRatio, color: sharpeRatio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+          { name: 'Sortino Ratio', value: sortinoRatio, color: sortinoRatio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+          { name: 'Calmar Ratio', value: calmarRatio, color: calmarRatio > 0 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+          { name: 'Profit Factor', value: profitFactor, color: profitFactor > 1 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+          { name: 'Win Rate', value: winRate * 100, color: winRate > 0.5 ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+          { name: 'Max Drawdown', value: Math.abs(maxDrawdown) * 100, color: 'hsl(0, 84%, 60%)' },
+        ];
+      } catch (err) {
+        console.error('Error processing risk metrics data:', err);
+        riskMetricsData = [];
+      }
 
       // DEX performance comparison
-      const dexPerformanceData = Object.entries(dexFinancials).map(([dex, data]) => ({
-        name: dex,
-        volume: data.total_volume_24h || 0,
-        fees: data.total_fees_24h || 0,
-        tvl: data.tvl_usd || 0,
-        priceImpact: data.price_impact_score || 0,
-      }));
+      let dexPerformanceData: Array<{ name: string; volume: number; fees: number; tvl: number; priceImpact: number }> = [];
+      try {
+        dexPerformanceData = Object.entries(dexFinancials).map(([dex, data]) => {
+          try {
+            return {
+              name: dex || 'Unknown',
+              volume: typeof data?.total_volume_24h === 'number' && isFinite(data.total_volume_24h) ? data.total_volume_24h : 0,
+              fees: typeof data?.total_fees_24h === 'number' && isFinite(data.total_fees_24h) ? data.total_fees_24h : 0,
+              tvl: typeof data?.tvl_usd === 'number' && isFinite(data.tvl_usd) ? data.tvl_usd : 0,
+              priceImpact: typeof data?.price_impact_score === 'number' && isFinite(data.price_impact_score) ? data.price_impact_score : 0,
+            };
+          } catch (err) {
+            console.error(`Error processing DEX ${dex}:`, err);
+            return {
+              name: dex || 'Unknown',
+              volume: 0,
+              fees: 0,
+              tvl: 0,
+              priceImpact: 0,
+            };
+          }
+        });
+      } catch (err) {
+        console.error('Error processing DEX performance data:', err);
+        dexPerformanceData = [];
+      }
 
       // Daily trends chart data
-      const dailyTrendsData = dailyTrends.map(trend => ({
-        date: trend.date || '',
-        profit: trend.profit || 0,
-        costs: trend.costs || 0,
-        volume: trend.volume || 0,
-        executions: trend.executions || 0,
-        successRate: (trend.success_rate || 0) * 100,
-        netProfit: (trend.profit || 0) - (trend.costs || 0),
-      }));
+      let dailyTrendsData: Array<{ date: string; profit: number; costs: number; volume: number; executions: number; successRate: number; netProfit: number }> = [];
+      try {
+        dailyTrendsData = dailyTrends.map(trend => {
+          try {
+            const profit = typeof trend?.profit === 'number' && isFinite(trend.profit) ? trend.profit : 0;
+            const costs = typeof trend?.costs === 'number' && isFinite(trend.costs) ? trend.costs : 0;
+            return {
+              date: typeof trend?.date === 'string' ? trend.date : '',
+              profit,
+              costs,
+              volume: typeof trend?.volume === 'number' && isFinite(trend.volume) ? trend.volume : 0,
+              executions: typeof trend?.executions === 'number' && isFinite(trend.executions) ? trend.executions : 0,
+              successRate: typeof trend?.success_rate === 'number' && isFinite(trend.success_rate) ? trend.success_rate * 100 : 0,
+              netProfit: isFinite(profit - costs) ? profit - costs : 0,
+            };
+          } catch (err) {
+            console.error('Error processing daily trend:', err);
+            return {
+              date: '',
+              profit: 0,
+              costs: 0,
+              volume: 0,
+              executions: 0,
+              successRate: 0,
+              netProfit: 0,
+            };
+          }
+        });
+      } catch (err) {
+        console.error('Error processing daily trends data:', err);
+        dailyTrendsData = [];
+      }
 
       // Market data summary
-      const marketDataArray = Object.entries(marketData).map(([token, data]) => ({
-        token,
-        price: data.current_price || 0,
-        priceChange24h: data.price_change_24h || 0,
-        priceChange7d: data.price_change_7d || 0,
-        volatility: data.volatility_24h || 0,
-        volume: data.volume_24h || 0,
-        liquidity: data.liquidity_usd || 0,
-      }));
+      let marketDataArray: Array<{ token: string; price: number; priceChange24h: number; priceChange7d: number; volatility: number; volume: number; liquidity: number }> = [];
+      try {
+        marketDataArray = Object.entries(marketData).map(([token, data]) => {
+          try {
+            return {
+              token: token || 'Unknown',
+              price: typeof data?.current_price === 'number' && isFinite(data.current_price) ? data.current_price : 0,
+              priceChange24h: typeof data?.price_change_24h === 'number' && isFinite(data.price_change_24h) ? data.price_change_24h : 0,
+              priceChange7d: typeof data?.price_change_7d === 'number' && isFinite(data.price_change_7d) ? data.price_change_7d : 0,
+              volatility: typeof data?.volatility_24h === 'number' && isFinite(data.volatility_24h) ? data.volatility_24h : 0,
+              volume: typeof data?.volume_24h === 'number' && isFinite(data.volume_24h) ? data.volume_24h : 0,
+              liquidity: typeof data?.liquidity_usd === 'number' && isFinite(data.liquidity_usd) ? data.liquidity_usd : 0,
+            };
+          } catch (err) {
+            console.error(`Error processing market data for ${token}:`, err);
+            return {
+              token: token || 'Unknown',
+              price: 0,
+              priceChange24h: 0,
+              priceChange7d: 0,
+              volatility: 0,
+              volume: 0,
+              liquidity: 0,
+            };
+          }
+        });
+      } catch (err) {
+        console.error('Error processing market data:', err);
+        marketDataArray = [];
+      }
 
       return {
         returnsDistribution,
@@ -1210,7 +1437,20 @@ export default function Dashboard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => fetchMetrics(true)}
+              onClick={() => {
+                try {
+                  fetchMetrics(true);
+                } catch (err) {
+                  console.error('Error refreshing metrics:', err);
+                  const errorMsg = err instanceof Error ? err.message : 'Failed to refresh metrics';
+                  setError(errorMsg);
+                  toast({
+                    title: 'Refresh failed',
+                    description: errorMsg,
+                    variant: 'destructive',
+                  });
+                }
+              }}
               disabled={isRefreshing || loading}
               className="gap-2"
             >
@@ -1224,7 +1464,24 @@ export default function Dashboard() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleExportCSV}
+                      onClick={() => {
+                        try {
+                          handleExportCSV();
+                          toast({
+                            title: 'Export started',
+                            description: 'CSV export will begin shortly',
+                          });
+                        } catch (err) {
+                          console.error('Error exporting CSV:', err);
+                          const errorMsg = err instanceof Error ? err.message : 'Failed to export CSV';
+                          setError(errorMsg);
+                          toast({
+                            title: 'Export failed',
+                            description: errorMsg,
+                            variant: 'destructive',
+                          });
+                        }
+                      }}
                       className="gap-2"
                     >
                       <FileSpreadsheet className="h-4 w-4" />
@@ -1240,7 +1497,24 @@ export default function Dashboard() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleExport}
+                      onClick={() => {
+                        try {
+                          handleExport();
+                          toast({
+                            title: 'Export started',
+                            description: 'JSON export will begin shortly',
+                          });
+                        } catch (err) {
+                          console.error('Error exporting JSON:', err);
+                          const errorMsg = err instanceof Error ? err.message : 'Failed to export data';
+                          setError(errorMsg);
+                          toast({
+                            title: 'Export failed',
+                            description: errorMsg,
+                            variant: 'destructive',
+                          });
+                        }
+                      }}
                       className="gap-2"
                     >
                       <Download className="h-4 w-4" />
@@ -1280,7 +1554,23 @@ export default function Dashboard() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => fetchMetrics(true)}
+              onClick={() => {
+                try {
+                  setError(null);
+                  setLoading(true);
+                  fetchMetrics(true);
+                } catch (err) {
+                  console.error('Error retrying fetch:', err);
+                  const errorMsg = err instanceof Error ? err.message : 'Failed to retry';
+                  setError(errorMsg);
+                  setLoading(false);
+                  toast({
+                    title: 'Retry failed',
+                    description: errorMsg,
+                    variant: 'destructive',
+                  });
+                }
+              }}
               className="ml-4"
             >
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -1345,7 +1635,15 @@ export default function Dashboard() {
         </Alert>
       ) : (
         <>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <Tabs value={activeTab} onValueChange={(value) => {
+            try {
+              if (typeof value === 'string') {
+                setActiveTab(value);
+              }
+            } catch (err) {
+              console.error('Error changing tab:', err);
+            }
+          }} className="space-y-4">
             <TabsList className="grid w-full max-w-2xl grid-cols-5 bg-muted/50 border border-border/60 backdrop-blur-sm shadow-md p-1.5 rounded-xl">
               <TabsTrigger value="overview" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Overview</TabsTrigger>
               <TabsTrigger value="financials" className="font-semibold data-[state=active]:bg-gradient-to-br data-[state=active]:from-primary/20 data-[state=active]:to-primary/10 data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:shadow-sm rounded-lg transition-all">Financials</TabsTrigger>

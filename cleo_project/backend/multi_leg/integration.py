@@ -66,9 +66,9 @@ class X402LegExecutor:
         """Convert leg to route format for x402 executor"""
         # Parse function data or metadata to extract route information
         metadata = {}
-        if leg.metadata:
+        if leg.extra_metadata:
             import json
-            metadata = json.loads(leg.metadata)
+            metadata = json.loads(leg.extra_metadata)
         
         # Create a simple route from leg data
         route = {
